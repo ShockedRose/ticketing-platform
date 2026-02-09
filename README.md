@@ -1,8 +1,8 @@
-# KCD Panama Ticketing Platform
+# CNCG Panama Ticketing Platform
 
 ## Overview
 
-A platform used by CNCG Panama to manage the ticket ordering process for the KCD Panama 2026 event
+A platform used by CNCG Panama to manage the ticket ordering process for their events.
 
 ## Prerequisites
 

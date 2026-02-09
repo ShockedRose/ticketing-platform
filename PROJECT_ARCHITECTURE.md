@@ -1,4 +1,4 @@
-# KCD Panama 2026 - Kubernetes Community Days
+# CNCG Panama Ticketing Platform
 
 ---
 
