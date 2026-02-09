@@ -1,6 +1,4 @@
-# KCD Delhi 2026 - Kubernetes Community Days
-
-Event landing page and ticketing platform for **Kubernetes Community Days Delhi 2026**, held on **February 21, 2026** at Holiday Inn New Delhi International Airport. Built with Next.js 16, React 19, Tailwind CSS, and shadcn/ui.
+# KCD Panama 2026 - Kubernetes Community Days
 
 ---
 
@@ -71,7 +69,7 @@ There is **no database or backend**. All event data (speakers, schedule, tickets
 
 ```bash
 git clone <repo-url>
-cd kcd-delhi-2026
+cd kcd-Panama-2026
 ```
 
 ### Step 2 -- Install dependencies
@@ -200,7 +198,7 @@ Navbar (sticky top)
 
 **Navbar** (`components/navbar.tsx`)
 - Sticky top bar with backdrop blur
-- Logo ("K" badge + "KCD Delhi"), nav links (About, Speakers, Schedule, Sponsors), Login button
+- Logo ("K" badge + "KCD Panama"), nav links (About, Speakers, Schedule, Sponsors), Login button
 - Responsive: hamburger menu on mobile (< md breakpoint)
 - Nav links are anchor links (`#about`, `#speakers`, etc.) for smooth scrolling
 
@@ -220,7 +218,7 @@ Navbar (sticky top)
 **Important:** The `useCountdown` hook accepts a `number` (milliseconds) to avoid re-render loops. The target date is stored as a module-level constant `EVENT_DATE_MS`.
 
 **AboutSection** (`components/about-section.tsx`)
-- Static descriptive text about KCD Delhi and CNCF
+- Static descriptive text about KCD Panama and CNCF
 
 **SpeakersSection** (`components/speakers-section.tsx`)
 - 6 speakers defined in `SPEAKERS` array
@@ -274,7 +272,7 @@ discountCode: string             // discount code input
 #### Layout
 
 ```
-Header (back arrow + "KCD Delhi 2026" + event date + session timer)
+Header (back arrow + "KCD Panama 2026" + event date + session timer)
 ├── Left: StepSidebar (vertical stepper icons)
 ├── Center: Step content (tickets / form / payment)
 ├── Right: CartSidebar (sticky, summary + discount + proceed)

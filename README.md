@@ -1,12 +1,12 @@
-# [PROJECT_NAME]
+# KCD Panama Ticketing Platform
 
 ## Overview
 
-[Project description goes here.]
+A platform used by CNCG Panama to manage the ticket ordering process for the KCD Panama 2026 event
 
 ## Prerequisites
 
-[Prerequisites go here.]
+TO-DO
 
 ## Getting Started
 
@@ -17,7 +17,8 @@ git clone <REPO_URL>
 cd <REPO_NAME>
 
 # Install dependencies
-make install
+npm install
+npm run dev
 ```
 
 ## Community
