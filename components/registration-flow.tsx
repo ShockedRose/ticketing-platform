@@ -10,6 +10,7 @@ import {
   Check,
   Clock,
   ExternalLink,
+  Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,57 +23,58 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import Link from "next/link"
+import { createOrder, updateOrderToAwaitingPayment } from "@/lib/actions/order.actions"
+import { validateDiscountCode, calculateDiscount } from "@/lib/actions/discount.actions"
+import type { TicketTierStatus } from "@prisma/client"
+import { mapStatusToUI } from "@/lib/utils"
 
 /* ------------------------------------------------------------------ */
-/*  Data                                                               */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
+
+export type TicketTierUI = {
+  id: string
+  name: string
+  slug: string
+  description: string
+  tagline: string | null
+  discount: string | null
+  couponCode: string | null
+  price: string // Decimal as string
+  currency: string
+  status: TicketTierStatus
+  totalQuantity: number
+  soldQuantity: number
+  sortOrder: number
+  features: string[]
+}
+
+type SelectedTickets = Record<string, number> // slug -> quantity
+
+interface AttendeeData {
+  name: string
+  email: string
+  country: string
+  jobTitle: string
+  company: string
+  industry: string
+  orgType: string
+  cncfConsent: boolean
+  whatsappUpdates: boolean
+}
+
+interface DiscountInfo {
+  code: string
+  discountType: "PERCENTAGE" | "FIXED"
+  discountValue: string
+  description: string | null
+}
+
+/* ------------------------------------------------------------------ */
+/*  Static Data                                                        */
 /* ------------------------------------------------------------------ */
 
 const PAGUELO_FACIL_URL = "https://checkout-demo.paguelofacil.com/kcd-test/123456"
-
-const TICKET_TIERS = [
-  {
-    id: "alpha",
-    name: "Alpha",
-    tagline: "Republic Day Special",
-    discount: "26% OFF",
-    couponCode: "REPUBLIC26",
-    description:
-      'This is the <strong>alpha release</strong> of KCD Delhi tickets, limited, cheapest, and first to land. You get full access to the event, just at the lowest price, because you showed up early.',
-    price: 2000,
-    status: "sold-out" as const,
-  },
-  {
-    id: "beta",
-    name: "Beta",
-    tagline: null,
-    discount: null,
-    couponCode: null,
-    description:
-      'This is the <strong>beta release</strong>, the "I waited just enough" tier. The smart money tier: not first, not last, no regrets.',
-    price: 2500,
-    status: "available" as const,
-  },
-  {
-    id: "ga",
-    name: "GA",
-    tagline: null,
-    discount: null,
-    couponCode: null,
-    description:
-      'This is the <strong>GA release</strong> of the ticket - The price and time reach maturity. Grab it or lose it!',
-    price: 3000,
-    status: "coming-soon" as const,
-  },
-]
-
-const TICKET_FEATURES = [
-  "Access to all talks and tracks (context switching encouraged)",
-  "Sponsor booths (demos, swag, and jobs)",
-  "Event goodies you'll benchmark against previous conferences",
-  "Meals and cafe access so your brain doesn't hit OOM",
-  "Networking with speakers and attendees (real-time, low-latency conversations)",
-  "Access to job openings, in case your current role is due for a rolling update",
-]
 
 const STEPS = [
   { id: "tickets", label: "Pick Tickets", icon: Ticket },
@@ -123,19 +125,10 @@ const ORG_TYPES = [
   "Other",
 ]
 
-type SelectedTickets = Record<string, number>
+/* ------------------------------------------------------------------ */
+/*  Helper functions                                                   */
+/* ------------------------------------------------------------------ */
 
-interface AttendeeData {
-  name: string
-  email: string
-  country: string
-  jobTitle: string
-  company: string
-  industry: string
-  orgType: string
-  cncfConsent: boolean
-  whatsappUpdates: boolean
-}
 
 /* ------------------------------------------------------------------ */
 /*  Session countdown (10 min)                                         */
@@ -219,10 +212,13 @@ function TicketCard({
   onAdd,
   isAdded,
 }: {
-  tier: (typeof TICKET_TIERS)[number]
+  tier: TicketTierUI
   onAdd: () => void
   isAdded: boolean
 }) {
+  const uiStatus = mapStatusToUI(tier.status)
+  const price = Number(tier.price)
+
   return (
     <div className="rounded-lg border border-border bg-card p-6">
       <div className="mb-3">
@@ -249,7 +245,7 @@ function TicketCard({
       <div className="mt-4">
         <p className="text-sm font-medium text-foreground">{"Your ticket includes:"}</p>
         <ul className="mt-2 flex flex-col gap-1.5 pl-5">
-          {TICKET_FEATURES.map((feature) => (
+          {tier.features.map((feature) => (
             <li key={feature} className="list-disc text-sm text-muted-foreground">
               {feature}
             </li>
@@ -264,15 +260,15 @@ function TicketCard({
       <div className="mt-4 flex items-center justify-between">
         <span className="text-xl font-bold text-foreground">
           {"₹ "}
-          {tier.price.toLocaleString("en-IN")}
+          {price.toLocaleString("en-IN")}
         </span>
 
-        {tier.status === "sold-out" && (
+        {uiStatus === "sold-out" && (
           <Button variant="secondary" disabled className="min-w-[100px]">
             Sold Out
           </Button>
         )}
-        {tier.status === "available" && (
+        {uiStatus === "available" && (
           <Button
             variant={isAdded ? "secondary" : "outline"}
             onClick={onAdd}
@@ -281,7 +277,7 @@ function TicketCard({
             {isAdded ? "Added" : "Add"}
           </Button>
         )}
-        {tier.status === "coming-soon" && (
+        {uiStatus === "coming-soon" && (
           <Button variant="secondary" disabled className="min-w-[100px]">
             Coming Soon
           </Button>
@@ -296,6 +292,7 @@ function TicketCard({
 /* ------------------------------------------------------------------ */
 
 function CartSidebar({
+  ticketTiers,
   selectedTickets,
   discountCode,
   onDiscountCodeChange,
@@ -303,7 +300,12 @@ function CartSidebar({
   onProceed,
   proceedLabel,
   showSummary,
+  appliedDiscount,
+  discountError,
+  isApplyingDiscount,
+  isProceedLoading,
 }: {
+  ticketTiers: TicketTierUI[]
   selectedTickets: SelectedTickets
   discountCode: string
   onDiscountCodeChange: (code: string) => void
@@ -311,12 +313,28 @@ function CartSidebar({
   onProceed: () => void
   proceedLabel: string
   showSummary: boolean
+  appliedDiscount: DiscountInfo | null
+  discountError: string | null
+  isApplyingDiscount: boolean
+  isProceedLoading: boolean
 }) {
   const hasSelection = Object.values(selectedTickets).some((qty) => qty > 0)
-  const subTotal = TICKET_TIERS.reduce(
-    (sum, tier) => sum + tier.price * (selectedTickets[tier.id] || 0),
+  const subTotal = ticketTiers.reduce(
+    (sum, tier) => sum + Number(tier.price) * (selectedTickets[tier.slug] || 0),
     0
   )
+
+  // Calculate discount amount
+  let discountAmount = 0
+  if (appliedDiscount) {
+    const discountValue = Number(appliedDiscount.discountValue)
+    if (appliedDiscount.discountType === "PERCENTAGE") {
+      discountAmount = (subTotal * discountValue) / 100
+    } else {
+      discountAmount = Math.min(discountValue, subTotal)
+    }
+  }
+  const total = subTotal - discountAmount
 
   return (
     <div className="rounded-lg border border-border bg-card p-6">
@@ -324,19 +342,19 @@ function CartSidebar({
         <div className="w-full">
           <p className="text-base font-bold text-foreground">{"Ticket Summary"}</p>
           <div className="mt-3 flex flex-col gap-2">
-            {TICKET_TIERS.filter((t) => (selectedTickets[t.id] || 0) > 0).map(
+            {ticketTiers.filter((t) => (selectedTickets[t.slug] || 0) > 0).map(
               (tier) => (
-                <div key={tier.id} className="flex items-center justify-between text-sm">
+                <div key={tier.slug} className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">
                     {tier.name}
                     <span className="ml-2 text-xs text-muted-foreground/70">
                       {"x "}
-                      {selectedTickets[tier.id]}
+                      {selectedTickets[tier.slug]}
                     </span>
                   </span>
                   <span className="font-medium text-foreground">
                     {"₹ "}
-                    {(tier.price * (selectedTickets[tier.id] || 0)).toLocaleString(
+                    {(Number(tier.price) * (selectedTickets[tier.slug] || 0)).toLocaleString(
                       "en-IN"
                     )}
                   </span>
@@ -350,12 +368,21 @@ function CartSidebar({
                 {subTotal.toLocaleString("en-IN")}
               </span>
             </div>
+            {appliedDiscount && discountAmount > 0 && (
+              <div className="flex items-center justify-between text-sm text-green-600">
+                <span>{"Discount (" + appliedDiscount.code + ")"}</span>
+                <span>
+                  {"- ₹ "}
+                  {discountAmount.toLocaleString("en-IN")}
+                </span>
+              </div>
+            )}
             <div className="border-t border-border pt-2">
               <div className="flex items-center justify-between text-base font-bold">
                 <span className="text-foreground">{"Total"}</span>
                 <span className="text-foreground">
                   {"₹ "}
-                  {subTotal.toLocaleString("en-IN")}
+                  {total.toLocaleString("en-IN")}
                   {"*"}
                 </span>
               </div>
@@ -383,15 +410,31 @@ function CartSidebar({
             value={discountCode}
             onChange={(e) => onDiscountCodeChange(e.target.value)}
             className="bg-card"
+            disabled={!!appliedDiscount}
           />
           <Button
             variant="outline"
             onClick={onApplyDiscount}
             className="shrink-0 bg-transparent"
+            disabled={isApplyingDiscount || !!appliedDiscount}
           >
-            Apply
+            {isApplyingDiscount ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : appliedDiscount ? (
+              <Check className="h-4 w-4" />
+            ) : (
+              "Apply"
+            )}
           </Button>
         </div>
+        {discountError && (
+          <p className="mt-1 text-xs text-destructive">{discountError}</p>
+        )}
+        {appliedDiscount && (
+          <p className="mt-1 text-xs text-green-600">
+            {"Discount applied: " + (appliedDiscount.description || appliedDiscount.code)}
+          </p>
+        )}
       </div>
 
       {/* Proceed / Checkout Button */}
@@ -399,8 +442,11 @@ function CartSidebar({
         className="mt-4 w-full"
         size="lg"
         onClick={onProceed}
-        disabled={!hasSelection}
+        disabled={!hasSelection || isProceedLoading}
       >
+        {isProceedLoading ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : null}
         {proceedLabel}
       </Button>
     </div>
@@ -592,16 +638,17 @@ function AttendeeDetailsStep({
 
 function PaymentStep({
   onBack,
-  selectedTickets,
+  total,
+  orderId,
+  onPay,
+  isPayLoading,
 }: {
   onBack: () => void
-  selectedTickets: SelectedTickets
+  total: number
+  orderId: string | null
+  onPay: () => void
+  isPayLoading: boolean
 }) {
-  const total = TICKET_TIERS.reduce(
-    (sum, tier) => sum + tier.price * (selectedTickets[tier.id] || 0),
-    0
-  )
-
   return (
     <div className="rounded-lg border border-border bg-card p-8 text-center">
       <CreditCard className="mx-auto h-14 w-14 text-primary" />
@@ -615,14 +662,25 @@ function PaymentStep({
         {"."}
       </p>
 
+      {orderId && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {"Order ID: "}
+          <span className="font-mono">{orderId.slice(0, 8)}...</span>
+        </p>
+      )}
+
       <div className="mx-auto mt-6 flex max-w-xs flex-col gap-3">
-        <Button asChild size="lg" className="gap-2">
-          <a href={PAGUELO_FACIL_URL} target="_blank" rel="noopener noreferrer">
-            {"Pay with PagueloFacil"}
-            <ExternalLink className="h-4 w-4" />
-          </a>
+        <Button size="lg" className="gap-2" onClick={onPay} disabled={isPayLoading}>
+          {isPayLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <>
+              {"Pay with PagueloFacil"}
+              <ExternalLink className="h-4 w-4" />
+            </>
+          )}
         </Button>
-        <Button variant="outline" onClick={onBack}>
+        <Button variant="outline" onClick={onBack} disabled={isPayLoading}>
           Back
         </Button>
       </div>
@@ -634,10 +692,17 @@ function PaymentStep({
 /*  Main Registration Flow                                             */
 /* ------------------------------------------------------------------ */
 
-export function RegistrationFlow() {
+export function RegistrationFlow({ ticketTiers }: { ticketTiers: TicketTierUI[] }) {
   const [currentStep, setCurrentStep] = useState(0)
   const [selectedTickets, setSelectedTickets] = useState<SelectedTickets>({})
   const [discountCode, setDiscountCode] = useState("")
+  const [appliedDiscount, setAppliedDiscount] = useState<DiscountInfo | null>(null)
+  const [discountError, setDiscountError] = useState<string | null>(null)
+  const [isApplyingDiscount, setIsApplyingDiscount] = useState(false)
+  const [isProceedLoading, setIsProceedLoading] = useState(false)
+  const [isPayLoading, setIsPayLoading] = useState(false)
+  const [orderId, setOrderId] = useState<string | null>(null)
+  const [orderError, setOrderError] = useState<string | null>(null)
   const [attendee, setAttendee] = useState<AttendeeData>({
     name: "",
     email: "",
@@ -652,17 +717,24 @@ export function RegistrationFlow() {
 
   const timer = useSessionTimer(1, currentStep)
 
-  function toggleTicket(id: string) {
+  function toggleTicket(slug: string) {
     setSelectedTickets((prev) => ({
       ...prev,
-      [id]: prev[id] ? 0 : 1,
+      [slug]: prev[slug] ? 0 : 1,
     }))
+    // Clear discount when selection changes
+    setAppliedDiscount(null)
+    setDiscountError(null)
   }
 
   const hasSelection = Object.values(selectedTickets).some((q) => q > 0)
 
   const selectedTierName =
-    TICKET_TIERS.find((t) => (selectedTickets[t.id] || 0) > 0)?.name ?? ""
+    ticketTiers.find((t) => (selectedTickets[t.slug] || 0) > 0)?.name ?? ""
+
+  const selectedSlugs = Object.entries(selectedTickets)
+    .filter(([, qty]) => qty > 0)
+    .map(([slug]) => slug)
 
   const isAttendeeValid =
     attendee.name.trim() !== "" &&
@@ -673,21 +745,102 @@ export function RegistrationFlow() {
     attendee.industry !== "" &&
     attendee.orgType !== ""
 
-  const handleProceed = useCallback(() => {
+  // Calculate totals
+  const subTotal = ticketTiers.reduce(
+    (sum, tier) => sum + Number(tier.price) * (selectedTickets[tier.slug] || 0),
+    0
+  )
+  let discountAmount = 0
+  if (appliedDiscount) {
+    const discountValue = Number(appliedDiscount.discountValue)
+    if (appliedDiscount.discountType === "PERCENTAGE") {
+      discountAmount = (subTotal * discountValue) / 100
+    } else {
+      discountAmount = Math.min(discountValue, subTotal)
+    }
+  }
+  const total = subTotal - discountAmount
+
+  // Handle discount code application
+  const handleApplyDiscount = useCallback(async () => {
+    if (!discountCode.trim()) {
+      setDiscountError("Please enter a discount code")
+      return
+    }
+
+    setIsApplyingDiscount(true)
+    setDiscountError(null)
+
+    try {
+      const result = await validateDiscountCode(discountCode, selectedSlugs)
+      if (result.valid && result.discount) {
+        setAppliedDiscount({
+          code: result.discount.code,
+          discountType: result.discount.discountType,
+          discountValue: result.discount.discountValue,
+          description: result.discount.description,
+        })
+        setDiscountError(null)
+      } else {
+        setDiscountError(result.error || "Invalid discount code")
+      }
+    } catch {
+      setDiscountError("Failed to validate discount code")
+    } finally {
+      setIsApplyingDiscount(false)
+    }
+  }, [discountCode, selectedSlugs])
+
+  // Handle proceed to next step
+  const handleProceed = useCallback(async () => {
+    setOrderError(null)
+
     if (currentStep === 0 && hasSelection) {
       setCurrentStep(1)
     } else if (currentStep === 1 && isAttendeeValid) {
-      setCurrentStep(2)
+      // Create order when proceeding to payment
+      setIsProceedLoading(true)
+      try {
+        const result = await createOrder({
+          selectedTickets,
+          attendee,
+          discountCode: appliedDiscount?.code,
+        })
+
+        if (result.success && result.orderId) {
+          setOrderId(result.orderId)
+          setCurrentStep(2)
+        } else {
+          setOrderError(result.error || "Failed to create order")
+        }
+      } catch {
+        setOrderError("An error occurred while creating your order")
+      } finally {
+        setIsProceedLoading(false)
+      }
     }
-  }, [currentStep, hasSelection, isAttendeeValid])
+  }, [currentStep, hasSelection, isAttendeeValid, selectedTickets, attendee, appliedDiscount])
+
+  // Handle payment redirect
+  const handlePay = useCallback(async () => {
+    if (!orderId) return
+
+    setIsPayLoading(true)
+    try {
+      // Update order status to awaiting payment
+      await updateOrderToAwaitingPayment(orderId)
+      // Redirect to payment provider
+      // In a real implementation, we'd generate a unique payment URL with the orderId
+      window.open(`${PAGUELO_FACIL_URL}?orderId=${orderId}`, "_blank")
+    } catch {
+      setOrderError("Failed to initiate payment")
+    } finally {
+      setIsPayLoading(false)
+    }
+  }, [orderId])
 
   const proceedLabel =
     currentStep === 0 ? "Proceed" : currentStep === 1 ? "Checkout" : "Pay Now"
-
-  const total = TICKET_TIERS.reduce(
-    (sum, tier) => sum + tier.price * (selectedTickets[tier.id] || 0),
-    0
-  )
 
   return (
     <div className="min-h-screen bg-background">
@@ -733,6 +886,13 @@ export function RegistrationFlow() {
 
       {/* Main Content */}
       <div className="mx-auto max-w-7xl px-4 py-8 lg:px-8">
+        {/* Order Error Alert */}
+        {orderError && (
+          <div className="mb-6 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+            {orderError}
+          </div>
+        )}
+
         <div className="flex gap-6 lg:gap-10">
           {/* Left: Step Indicator */}
           <div className="hidden shrink-0 md:block">
@@ -777,12 +937,12 @@ export function RegistrationFlow() {
             {/* Step: Pick Tickets */}
             {currentStep === 0 && (
               <div className="flex flex-col gap-6">
-                {TICKET_TIERS.map((tier) => (
+                {ticketTiers.map((tier) => (
                   <TicketCard
-                    key={tier.id}
+                    key={tier.slug}
                     tier={tier}
-                    isAdded={(selectedTickets[tier.id] || 0) > 0}
-                    onAdd={() => toggleTicket(tier.id)}
+                    isAdded={(selectedTickets[tier.slug] || 0) > 0}
+                    onAdd={() => toggleTicket(tier.slug)}
                   />
                 ))}
               </div>
@@ -801,7 +961,10 @@ export function RegistrationFlow() {
             {currentStep === 2 && (
               <PaymentStep
                 onBack={() => setCurrentStep(1)}
-                selectedTickets={selectedTickets}
+                total={total}
+                orderId={orderId}
+                onPay={handlePay}
+                isPayLoading={isPayLoading}
               />
             )}
           </div>
@@ -810,17 +973,22 @@ export function RegistrationFlow() {
           <div className="hidden w-72 shrink-0 lg:block">
             <div className="sticky top-8">
               <CartSidebar
+                ticketTiers={ticketTiers}
                 selectedTickets={selectedTickets}
                 discountCode={discountCode}
                 onDiscountCodeChange={setDiscountCode}
-                onApplyDiscount={() => {}}
+                onApplyDiscount={handleApplyDiscount}
                 onProceed={
                   currentStep === 2
-                    ? () => window.open(PAGUELO_FACIL_URL, "_blank")
+                    ? handlePay
                     : handleProceed
                 }
                 proceedLabel={proceedLabel}
                 showSummary={currentStep >= 1}
+                appliedDiscount={appliedDiscount}
+                discountError={discountError}
+                isApplyingDiscount={isApplyingDiscount}
+                isProceedLoading={isProceedLoading || isPayLoading}
               />
             </div>
           </div>
@@ -847,20 +1015,24 @@ export function RegistrationFlow() {
               )}
             </div>
             {currentStep === 2 ? (
-              <Button size="sm" asChild>
-                <a href={PAGUELO_FACIL_URL} target="_blank" rel="noopener noreferrer">
-                  {"Pay Now"}
-                </a>
+              <Button size="sm" onClick={handlePay} disabled={isPayLoading}>
+                {isPayLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Pay Now"}
               </Button>
             ) : (
               <Button
                 size="sm"
                 disabled={
-                  currentStep === 0 ? !hasSelection : !isAttendeeValid
+                  (currentStep === 0 ? !hasSelection : !isAttendeeValid) || isProceedLoading
                 }
                 onClick={handleProceed}
               >
-                {currentStep === 0 ? "Proceed" : "Checkout"}
+                {isProceedLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : currentStep === 0 ? (
+                  "Proceed"
+                ) : (
+                  "Checkout"
+                )}
               </Button>
             )}
           </div>

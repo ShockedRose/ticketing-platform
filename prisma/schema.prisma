@@ -1,0 +1,188 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum TicketTierStatus {
+  AVAILABLE
+  SOLD_OUT
+  COMING_SOON
+}
+
+enum OrderStatus {
+  PENDING
+  AWAITING_PAYMENT
+  PAID
+  CANCELLED
+  REFUNDED
+  EXPIRED
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+// ---------------------------------------------------------------------------
+// Auth models (NextAuth v5 compatible)
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String    @default("NO_NAME")
+  email         String    @unique(map: "user_email_idx")
+  emailVerified DateTime? @db.Timestamp(6)
+  image         String?
+  password      String?
+  role          Role      @default(USER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  account       Account[]
+  Session       Session[]
+}
+
+model Account {
+  userId            String   @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  createdAt DateTime @default(now()) @db.Timestamp(6)
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @id
+  userId       String   @db.Uuid
+  expires      DateTime @db.Timestamp(6)
+  createdAt    DateTime @default(now()) @db.Timestamp(6)
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// Ticket store domain models
+// ---------------------------------------------------------------------------
+
+model TicketTier {
+  id            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String
+  slug          String            @unique(map: "ticket_tier_slug_idx")
+  description   String
+  tagline       String?
+  discount      String?
+  couponCode    String?
+  price         Decimal           @db.Decimal(12, 2)
+  currency      String            @default("USD")
+  status        TicketTierStatus
+  totalQuantity Int              @default(0)
+  soldQuantity  Int              @default(0)
+  sortOrder     Int              @default(0)
+  features      String[]         @default([])
+  createdAt     DateTime         @default(now()) @db.Timestamp(6)
+  updatedAt     DateTime         @updatedAt
+  OrderItem     OrderItem[]
+  DiscountCode  DiscountCode[]
+}
+
+model DiscountCode {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code          String       @unique(map: "discount_code_code_idx")
+  description   String?
+  discountType  DiscountType
+  discountValue Decimal      @db.Decimal(12, 2)
+  maxUses       Int?
+  currentUses   Int          @default(0)
+  validFrom     DateTime?
+  validUntil    DateTime?
+  isActive      Boolean      @default(true)
+  ticketTierId  String?      @db.Uuid
+  createdAt     DateTime     @default(now()) @db.Timestamp(6)
+  updatedAt     DateTime     @updatedAt
+  ticketTier    TicketTier?  @relation(fields: [ticketTierId], references: [id], onDelete: SetNull)
+  Order         Order[]
+}
+
+model Order {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status         OrderStatus  @default(PENDING)
+  totalAmount    Decimal      @db.Decimal(12, 2)
+  currency       String       @default("INR")
+  discountAmount Decimal      @default(0) @db.Decimal(12, 2)
+  paymentMethod  String?
+  paymentId      String?
+  paymentResult  Json?        @db.Json
+  paidAt         DateTime?    @db.Timestamp(6)
+  expiresAt      DateTime?    @db.Timestamp(6)
+  discountCodeId String?      @db.Uuid
+  createdAt      DateTime     @default(now()) @db.Timestamp(6)
+  updatedAt      DateTime     @updatedAt
+  discountCode   DiscountCode? @relation(fields: [discountCodeId], references: [id], onDelete: SetNull)
+  attendee       Attendee?
+  orderItems     OrderItem[]
+}
+
+model OrderItem {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId      String     @db.Uuid
+  ticketTierId String     @db.Uuid
+  quantity     Int
+  unitPrice    Decimal    @db.Decimal(12, 2)
+  totalPrice   Decimal    @db.Decimal(12, 2)
+  order        Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketTier   TicketTier @relation(fields: [ticketTierId], references: [id], onDelete: Restrict)
+}
+
+model Attendee {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId         String   @unique(map: "attendee_order_id_idx") @db.Uuid
+  name            String
+  email           String
+  country         String
+  jobTitle        String
+  company         String
+  industry        String
+  orgType         String
+  cncfConsent     Boolean  @default(false)
+  whatsappUpdates Boolean  @default(false)
+  createdAt       DateTime @default(now()) @db.Timestamp(6)
+  updatedAt       DateTime @updatedAt
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
