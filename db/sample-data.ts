@@ -15,10 +15,10 @@ export const sampleTicketTiers = [
     name: "Alpha",
     slug: "alpha",
     description:
-      'This is the <strong>alpha release</strong> of KCD Delhi tickets, limited, cheapest, and first to land. You get full access to the event, just at the lowest price, because you showed up early.',
+      'This is the <strong>alpha release</strong> of KCD Panama tickets, limited, cheapest, and first to land. You get full access to the event, just at the lowest price, because you showed up early.',
     tagline: "Republic Day Special",
-    discount: "26% OFF",
-    couponCode: "REPUBLIC26",
+    discount: null,
+    couponCode: null,
     price: 2000,
     status: "SOLD_OUT" as TicketTierStatus,
     totalQuantity: 100,

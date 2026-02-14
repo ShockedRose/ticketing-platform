@@ -31,6 +31,21 @@ export type CreateOrderResult = {
   error?: string;
 };
 
+type PagueloFacilLinkResponse = {
+  headerStatus?: {
+    code?: number;
+    description?: string;
+  };
+  serverTime?: string;
+  message?: string;
+  requestId?: string | null;
+  data?: {
+    url?: string;
+    code?: string;
+  };
+  success?: boolean;
+};
+
 export type OrderWithDetails = {
   id: string;
   status: OrderStatus;
@@ -293,7 +308,7 @@ export async function updateOrderToPaid(input: {
         status: "PAID",
         paymentId,
         paymentMethod: paymentMethod ?? "PagueloFacil",
-        paymentResult: paymentResult ?? null,
+        paymentResult: paymentResult ?? undefined,
         paidAt: new Date(),
       },
     });
@@ -343,6 +358,117 @@ export async function updateOrderToAwaitingPayment(
       success: false,
       error:
         error instanceof Error ? error.message : "Failed to update order",
+    };
+  }
+}
+
+/**
+ * Creates a payment URL in PagueloFacil for an order.
+ * Uses order details to build the request payload and returns
+ * the payment URL when provider responds with headerStatus.code = 200.
+ */
+export async function createPaymentUrl(
+  orderId: string
+): Promise<{ success: boolean; url?: string; error?: string }> {
+  try {
+    const cclw = process.env.PAGUELOFACIL_CCLW;
+    const returnUrl = process.env.PAGUELOFACIL_RETURN_URL;
+    const baseUrl =
+      process.env.PAGUELOFACIL_BASE_URL ?? "https://sandbox.paguelofacil.com";
+
+    if (!cclw || !returnUrl) {
+      return {
+        success: false,
+        error:
+          "Payment provider is not configured correctly. Please contact support.",
+      };
+    }
+
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        orderItems: {
+          include: {
+            ticketTier: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!order) {
+      return { success: false, error: "Order not found" };
+    }
+
+    if (order.status === "PAID") {
+      return { success: false, error: "Order is already paid" };
+    }
+
+    if (order.status === "CANCELLED" || order.status === "EXPIRED") {
+      return { success: false, error: "Order is no longer valid" };
+    }
+
+    const amount = Number(order.totalAmount);
+    const taxAmount = amount * 0.07;
+    const description = `Purchase of the tickets: ${order.orderItems
+      .map(
+        (item) =>
+          `${item.ticketTier.name} x${item.quantity} @ ${Number(item.unitPrice).toFixed(2)}`
+      )
+      .join(", ")}`.slice(0, 255);
+
+    const form = new URLSearchParams({
+      CCLW: cclw,
+      CMTN: amount.toFixed(2),
+      CDSC: description,
+      RETURN_URL: returnUrl,
+      EXPIRES_IN: "3600",
+      CTAX: taxAmount.toFixed(2),
+    });
+
+    const response = await fetch(`${baseUrl}/LinkDeamon.cfm`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/plain, */*",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: form.toString(),
+      cache: "no-store",
+    });
+
+    const payload = (await response.json()) as PagueloFacilLinkResponse;
+    const providerCode = payload?.headerStatus?.code;
+    const paymentUrl = payload?.data?.url;
+
+    if (providerCode !== 200 || !paymentUrl) {
+      return {
+        success: false,
+        error:
+          payload?.headerStatus?.description ||
+          payload?.message ||
+          "Payment provider rejected the request",
+      };
+    }
+
+    await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        paymentId: payload.data?.code ?? null,
+        paymentMethod: "PagueloFacil",
+        paymentResult: payload,
+      },
+    });
+
+    return { success: true, url: paymentUrl };
+  } catch (error) {
+    console.error("Error creating payment url:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to create payment URL",
     };
   }
 }

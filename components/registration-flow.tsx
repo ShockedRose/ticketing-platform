@@ -23,7 +23,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import Link from "next/link"
-import { createOrder, updateOrderToAwaitingPayment } from "@/lib/actions/order.actions"
+import {
+  createOrder,
+  createPaymentUrl,
+  updateOrderToAwaitingPayment,
+} from "@/lib/actions/order.actions"
 import { validateDiscountCode, calculateDiscount } from "@/lib/actions/discount.actions"
 import type { TicketTierStatus } from "@prisma/client"
 import { mapStatusToUI } from "@/lib/utils"
@@ -73,8 +77,6 @@ interface DiscountInfo {
 /* ------------------------------------------------------------------ */
 /*  Static Data                                                        */
 /* ------------------------------------------------------------------ */
-
-const PAGUELO_FACIL_URL = "https://checkout-demo.paguelofacil.com/kcd-test/123456"
 
 const STEPS = [
   { id: "tickets", label: "Pick Tickets", icon: Ticket },
@@ -299,7 +301,6 @@ function CartSidebar({
   onApplyDiscount,
   onProceed,
   proceedLabel,
-  showSummary,
   appliedDiscount,
   discountError,
   isApplyingDiscount,
@@ -312,7 +313,6 @@ function CartSidebar({
   onApplyDiscount: () => void
   onProceed: () => void
   proceedLabel: string
-  showSummary: boolean
   appliedDiscount: DiscountInfo | null
   discountError: string | null
   isApplyingDiscount: boolean
@@ -338,7 +338,7 @@ function CartSidebar({
 
   return (
     <div className="rounded-lg border border-border bg-card p-6">
-      {showSummary && hasSelection ? (
+      {hasSelection ? (
         <div className="w-full">
           <p className="text-base font-bold text-foreground">{"Ticket Summary"}</p>
           <div className="mt-3 flex flex-col gap-2">
@@ -826,14 +826,30 @@ export function RegistrationFlow({ ticketTiers }: { ticketTiers: TicketTierUI[] 
     if (!orderId) return
 
     setIsPayLoading(true)
+    setOrderError(null)
     try {
+      const payment = await createPaymentUrl(orderId)
+      if (!payment.success || !payment.url) {
+        const message = payment.error || "Failed to initialize payment. Please try again."
+        setOrderError(message)
+        window.alert("We could not start payment. Please try again.")
+        return
+      }
+
       // Update order status to awaiting payment
-      await updateOrderToAwaitingPayment(orderId)
-      // Redirect to payment provider
-      // In a real implementation, we'd generate a unique payment URL with the orderId
-      window.open(`${PAGUELO_FACIL_URL}?orderId=${orderId}`, "_blank")
+      const statusResult = await updateOrderToAwaitingPayment(orderId)
+      if (!statusResult.success) {
+        const message = statusResult.error || "Failed to initialize payment. Please try again."
+        setOrderError(message)
+        window.alert("We could not start payment. Please try again.")
+        return
+      }
+
+      // Redirect user to payment provider URL
+      window.location.assign(payment.url)
     } catch {
-      setOrderError("Failed to initiate payment")
+      setOrderError("Failed to initiate payment. Please try again.")
+      window.alert("We could not start payment. Please try again.")
     } finally {
       setIsPayLoading(false)
     }
@@ -856,9 +872,9 @@ export function RegistrationFlow({ ticketTiers }: { ticketTiers: TicketTierUI[] 
               <ArrowLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-lg font-bold text-foreground">{"KCD Delhi 2026"}</h1>
+              <h1 className="text-lg font-bold text-foreground">{"KCD Panama 2026"}</h1>
               <p className="text-sm text-muted-foreground">
-                {"Feb 21st, 2026 at 8:00 AM (GMT+05:30) to Feb 21st, 2026 at 6:00 PM (GMT+05:30)"}
+                {"Apr 21st, 2026 at 8:00 AM (GMT-5) to Apr 23rd, 2026 at 6:00 PM (GMT-5)"}
               </p>
             </div>
           </div>
@@ -984,7 +1000,6 @@ export function RegistrationFlow({ ticketTiers }: { ticketTiers: TicketTierUI[] 
                     : handleProceed
                 }
                 proceedLabel={proceedLabel}
-                showSummary={currentStep >= 1}
                 appliedDiscount={appliedDiscount}
                 discountError={discountError}
                 isApplyingDiscount={isApplyingDiscount}
@@ -1041,8 +1056,6 @@ export function RegistrationFlow({ ticketTiers }: { ticketTiers: TicketTierUI[] 
 
       {/* Footer */}
       <div className="border-t border-border py-6 text-center">
-        <p className="text-xs text-muted-foreground">{"Powered By"}</p>
-        <p className="text-sm font-bold text-foreground">{"KONFHUB"}</p>
       </div>
     </div>
   )
