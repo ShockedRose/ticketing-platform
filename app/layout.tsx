@@ -7,13 +7,13 @@ import './globals.css'
 const _inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 
 export const metadata: Metadata = {
-  title: 'KCD Delhi 2026 - Kubernetes Community Days',
+  title: 'KCD Panama 2026 - Kubernetes Community Days',
   description:
-    'Join the cloud-native community at Kubernetes Community Days Delhi 2026. Feb 21, 2026 at Holiday Inn New Delhi.',
+    'Join the cloud-native community at Kubernetes Community Days Panama 2026. Apr 21-23, 2026 at Ciudad del Saber, Panama City.',
 }
 
 export const viewport = {
-  themeColor: '#4f46e5',
+  themeColor: '#0086FF',
 }
 
 export default function RootLayout({
