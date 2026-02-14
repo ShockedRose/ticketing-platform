@@ -20,9 +20,9 @@ export function Navbar() {
         {/* Logo */}
         <a href="#" className="flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
-            <span className="text-sm font-bold text-primary-foreground">K</span>
+            <span className="text-sm font-bold text-primary-foreground">C</span>
           </div>
-          <span className="text-lg font-bold text-foreground">KCD Delhi</span>
+          <span className="text-lg font-bold text-foreground" title="Cloud Native Computing Foundation Panama Chapter Ticker">CNCG Panama Ticker</span>
         </a>
 
         {/* Desktop Links */}
