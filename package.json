@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -78,11 +79,5 @@
     "bufferutil": "^4.0.9",
     "dotenv": "^16.4.7",
     "prisma": "6.1.0"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "prisma",
-      "@prisma/client"
-    ]
   }
 }
