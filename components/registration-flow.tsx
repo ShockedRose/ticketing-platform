@@ -263,18 +263,17 @@ function TicketCard({
 
       <div className="mt-4 flex items-center justify-between">
         <span className="text-xl font-bold text-foreground">
-          {"₹ "}
+          {"$ "}
           {tier.price.toLocaleString("en-IN")}
         </span>
 
         {tier.status === "sold-out" && (
-          <Button variant="secondary" disabled className="min-w-[100px]">
+          <Button variant="outline" disabled className="min-w-[100px]">
             Sold Out
           </Button>
         )}
         {tier.status === "available" && (
           <Button
-            variant={isAdded ? "secondary" : "outline"}
             onClick={onAdd}
             className="min-w-[100px]"
           >
@@ -282,7 +281,7 @@ function TicketCard({
           </Button>
         )}
         {tier.status === "coming-soon" && (
-          <Button variant="secondary" disabled className="min-w-[100px]">
+          <Button variant="outline" disabled className="min-w-[100px]">
             Coming Soon
           </Button>
         )}
