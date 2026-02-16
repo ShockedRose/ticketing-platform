@@ -17,41 +17,38 @@ const FOOTER_LINKS = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-border bg-card">
-      <div className="mx-auto flex max-w-7xl flex-col items-center gap-6 px-4 py-10 lg:flex-row lg:justify-between lg:px-8">
-        {/* Left */}
-        <div className="flex flex-col items-center gap-2 lg:items-start">
+    <footer className="border-t border-border bg-muted/30">
+      <div className="mx-auto flex max-w-7xl flex-col items-center gap-8 px-4 py-12 lg:flex-row lg:justify-between lg:px-8">
+        <div className="flex flex-col items-center gap-4 lg:items-start">
           <div className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
               <span className="text-xs font-bold text-primary-foreground">C</span>
             </div>
             <span className="text-sm font-bold text-foreground">CNCG Panama </span>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {"A Cloud Native Computing Foundation community event."}
+          <p className="text-sm text-muted-foreground text-center lg:text-left max-w-xs">
+            A community supported by the Cloud Native Computing Foundation.
           </p>
         </div>
 
-        {/* Links */}
-        <div className="flex items-center gap-6">
+        <div className="flex flex-wrap justify-center gap-x-8 gap-y-4">
           {FOOTER_LINKS.map((link) => (
             <a
               key={link.label}
               href={link.href}
-              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+              className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
             >
               {link.label}
             </a>
           ))}
         </div>
 
-        {/* Social */}
         <div className="flex items-center gap-4">
           {SOCIAL_LINKS.map((social) => (
             <a
               key={social.label}
               href={social.href}
-              className="text-muted-foreground transition-colors hover:text-foreground"
+              className="rounded-full bg-background p-2 text-muted-foreground shadow-sm ring-1 ring-border transition-all hover:bg-primary hover:text-primary-foreground hover:ring-primary"
               aria-label={social.label}
             >
               <social.icon className="h-5 w-5" />
@@ -59,6 +56,13 @@ export function Footer() {
           ))}
         </div>
       </div>
+
+      <div className="border-t border-border/50 py-6 text-center">
+        <p className="text-xs text-muted-foreground">
+          © {new Date().getFullYear()} Kubernetes Community Days Panama. All
+          rights reserved.
+        </p>
+      </div>
     </footer>
-  )
+  );
 }

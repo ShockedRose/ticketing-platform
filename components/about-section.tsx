@@ -1,8 +1,14 @@
 export function AboutSection() {
   return (
     <section id="about" className="scroll-mt-20">
-      <h2 className="text-2xl font-bold text-foreground">About the Event</h2>
-      <div className="mt-4 flex flex-col gap-4 text-sm leading-relaxed text-muted-foreground">
+      <div className="relative">
+        <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+          About the Event
+        </h2>
+        <div className="absolute -left-4 top-1 h-8 w-1 rounded-full bg-secondary md:-left-8" />
+      </div>
+
+      <div className="mt-6 flex flex-col gap-6 text-lg leading-relaxed text-muted-foreground">
         <p>
           Kubernetes Community Days (KCD) Panama 2026 brings together cloud-native enthusiasts,
           developers, DevOps engineers, and IT leaders from across the region for 3 days of learning,
@@ -17,5 +23,5 @@ export function AboutSection() {
         </p>
       </div>
     </section>
-  )
+  );
 }

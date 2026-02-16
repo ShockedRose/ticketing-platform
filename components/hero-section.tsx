@@ -1,19 +1,26 @@
-import { Calendar, MapPin } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { Calendar, MapPin } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export function HeroSection() {
   return (
-    <section>
-      {/* Banner Image */}
-      <div className="relative h-56 w-full overflow-hidden rounded-xl sm:h-72">
+    <section className="flex flex-col gap-6">
+      <div className="group relative aspect-video w-full overflow-hidden rounded-lg border-2 border-primary/10 shadow-xl transition-all hover:border-primary/30 sm:aspect-[2/1]">
         <img
           src="/images/banner.webp"
           alt="KCD Panama 2026 conference venue with attendees"
           className="h-full w-full object-cover"
         />
-        <div className="absolute inset-0 bg-foreground/30" />
-        <div className="absolute bottom-4 left-4">
-          <Badge className="bg-primary text-primary-foreground">In-Person Event</Badge>
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+        <div className="absolute bottom-4 left-4 flex gap-2">
+          <Badge className="text-sm font-medium px-3 py-1">
+            In-Person Event
+          </Badge>
+          <Badge
+            variant="outline"
+            className="bg-background/90 text-foreground border-none text-sm font-medium px-3 py-1"
+          >
+            Cloud Native
+          </Badge>
         </div>
       </div>
 
@@ -34,5 +41,5 @@ export function HeroSection() {
         </div>
       </div>
     </section>
-  )
+  );
 }
