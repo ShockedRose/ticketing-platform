@@ -2,6 +2,10 @@
 
 ---
 
+## Related Docs
+- [DATA_MODEL.md](DATA_MODEL.md)
+- [USE_CASES_DATA_MAP.md](USE_CASES_DATA_MAP.md)
+
 ## Table of Contents
 
 1. [Project Overview](#project-overview)
