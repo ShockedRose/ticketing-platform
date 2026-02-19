@@ -8,7 +8,7 @@ export function HeroSection() {
         <img
           src="/images/banner.webp"
           alt="KCD Panama 2026 conference venue with attendees"
-          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+          className="h-full w-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
         <div className="absolute bottom-4 left-4 flex gap-2">
@@ -24,23 +24,20 @@ export function HeroSection() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-4">
-        <h1 className="text-balance text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl md:text-5xl lg:leading-[1.1]">
-          Kubernetes Community Days{" "}
-          <span className="text-primary">Panama 2026</span>
+      {/* Event Info */}
+      <div className="mt-6">
+        <h1 className="text-balance text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+          Kubernetes Community Days Panama 2026
         </h1>
-
-        <div className="flex flex-wrap items-center gap-6 text-base font-medium text-muted-foreground">
-          <div className="flex items-center gap-2 rounded-md bg-secondary/10 px-3 py-1.5 text-secondary-foreground ">
-            <Calendar className="h-5 w-5 text-secondary" />
-            <span className="text-foreground">Apr 21-23, 2026</span>
-          </div>
-          <div className="flex items-center gap-2 rounded-md bg-primary/10 px-3 py-1.5 text-primary-foreground ">
-            <MapPin className="h-5 w-5 text-primary" />
-            <span className="text-foreground">
-              Ciudad del Saber, Panama City
-            </span>
-          </div>
+        <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <Calendar className="h-4 w-4 text-primary" />
+            Apr 21-23, 2026
+          </span>
+          <span className="flex items-center gap-1.5">
+            <MapPin className="h-4 w-4 text-primary" />
+            {"Ciudad del Saber, Panama City"}
+          </span>
         </div>
       </div>
     </section>

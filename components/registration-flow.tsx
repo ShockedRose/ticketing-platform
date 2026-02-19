@@ -1,6 +1,6 @@
-"use client"
+"use client";
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   ArrowLeft,
   ShoppingCart,
@@ -10,78 +10,104 @@ import {
   Check,
   Clock,
   ExternalLink,
-} from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Checkbox } from "@/components/ui/checkbox"
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import Link from "next/link"
+} from "@/components/ui/select";
+import Link from "next/link";
+import {
+  createOrder,
+  createPaymentUrl,
+  updateOrderToAwaitingPayment,
+} from "@/lib/actions/order.actions";
+import { validateDiscountCode } from "@/lib/actions/discount.actions";
+import { mapStatusToUI } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
-/*  Data                                                               */
+/*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-const PAGUELO_FACIL_URL = "https://checkout-demo.paguelofacil.com/kcd-test/123456"
+export type TicketTierUI = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  tagline: string | null;
+  discount: string | null;
+  couponCode: string | null;
+  price: string; // Decimal as string
+  currency: string;
+  status: "AVAILABLE" | "SOLD_OUT" | "COMING_SOON";
+  totalQuantity: number;
+  soldQuantity: number;
+  sortOrder: number;
+  features: string[];
+};
 
-const TICKET_TIERS = [
-  {
-    id: "alpha",
-    name: "Alpha",
-    tagline: "Republic Day Special",
-    discount: "26% OFF",
-    couponCode: "REPUBLIC26",
-    description:
-      'This is the <strong>alpha release</strong> of KCD Delhi tickets, limited, cheapest, and first to land. You get full access to the event, just at the lowest price, because you showed up early.',
-    price: 2000,
-    status: "sold-out" as const,
-  },
-  {
-    id: "beta",
-    name: "Beta",
-    tagline: null,
-    discount: null,
-    couponCode: null,
-    description:
-      'This is the <strong>beta release</strong>, the "I waited just enough" tier. The smart money tier: not first, not last, no regrets.',
-    price: 2500,
-    status: "available" as const,
-  },
-  {
-    id: "ga",
-    name: "GA",
-    tagline: null,
-    discount: null,
-    couponCode: null,
-    description:
-      'This is the <strong>GA release</strong> of the ticket - The price and time reach maturity. Grab it or lose it!',
-    price: 3000,
-    status: "coming-soon" as const,
-  },
-]
+type SelectedTickets = Record<string, number>; // slug -> quantity
 
-const TICKET_FEATURES = [
-  "Access to all talks and tracks (context switching encouraged)",
-  "Sponsor booths (demos, swag, and jobs)",
-  "Event goodies you'll benchmark against previous conferences",
-  "Meals and cafe access so your brain doesn't hit OOM",
-  "Networking with speakers and attendees (real-time, low-latency conversations)",
-  "Access to job openings, in case your current role is due for a rolling update",
-]
+interface BuyerData {
+  fullName: string;
+  email: string;
+  phone: string;
+}
+
+interface AttendeeData {
+  firstName: string;
+  lastName: string;
+  email: string;
+  country: string;
+  jobTitle: string;
+  companyName: string;
+  companyUrl: string;
+  workAddress: string;
+  workPhone: string;
+  emergencyContact: string;
+  githubHandle: string;
+  industry: string;
+  organizationRepresents: string;
+  organizationType: string;
+  primaryRole: string;
+  firstTimeKcd: string;
+  shirtSize: string;
+  dietaryNeeds: string;
+  disabilityAccommodation: string;
+  personOfColor: string;
+  genderIdentity: string;
+  ageRange: string;
+  cncfConsent: boolean;
+  sponsorCommunicationsOptIn: boolean;
+}
+
+interface DiscountInfo {
+  code: string;
+  discountType: "PERCENTAGE" | "FIXED";
+  discountValue: string;
+  description: string | null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Static Data                                                        */
+/* ------------------------------------------------------------------ */
 
 const STEPS = [
   { id: "tickets", label: "Pick Tickets", icon: Ticket },
   { id: "attendee", label: "Attendee\nDetails", icon: Users },
   { id: "payment", label: "Payment", icon: CreditCard },
-]
+];
 
 const COUNTRIES = [
-  "India",
+  "Panama",
   "United States",
   "United Kingdom",
   "Canada",
@@ -97,7 +123,7 @@ const COUNTRIES = [
   "Israel",
   "UAE",
   "Other",
-]
+];
 
 const INDUSTRIES = [
   "Information Technology",
@@ -112,7 +138,7 @@ const INDUSTRIES = [
   "Consulting",
   "Startup",
   "Other",
-]
+];
 
 const ORG_TYPES = [
   "Uses open source software",
@@ -121,20 +147,52 @@ const ORG_TYPES = [
   "Is an open source project",
   "Does not use open source",
   "Other",
-]
+];
 
-type SelectedTickets = Record<string, number>
+const MAX_TICKETS_PER_BUYER = 5;
 
-interface AttendeeData {
-  name: string
-  email: string
-  country: string
-  jobTitle: string
-  company: string
-  industry: string
-  orgType: string
-  cncfConsent: boolean
-  whatsappUpdates: boolean
+function createEmptyAttendee(): AttendeeData {
+  return {
+    firstName: "",
+    lastName: "",
+    email: "",
+    country: "",
+    jobTitle: "",
+    companyName: "",
+    companyUrl: "",
+    workAddress: "",
+    workPhone: "",
+    emergencyContact: "",
+    githubHandle: "",
+    industry: "",
+    organizationRepresents: "",
+    organizationType: "",
+    primaryRole: "",
+    firstTimeKcd: "",
+    shirtSize: "",
+    dietaryNeeds: "",
+    disabilityAccommodation: "",
+    personOfColor: "",
+    genderIdentity: "",
+    ageRange: "",
+    cncfConsent: false,
+    sponsorCommunicationsOptIn: false,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Helper functions                                                   */
+/* ------------------------------------------------------------------ */
+
+const USD_FORMATTER = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+});
+
+function formatUSD(amount: number) {
+  return USD_FORMATTER.format(amount);
 }
 
 /* ------------------------------------------------------------------ */
@@ -142,26 +200,26 @@ interface AttendeeData {
 /* ------------------------------------------------------------------ */
 
 function useSessionTimer(startOnStep: number, currentStep: number) {
-  const [secondsLeft, setSecondsLeft] = useState(600) // 10 minutes
-  const [started, setStarted] = useState(false)
+  const [secondsLeft, setSecondsLeft] = useState(600); // 10 minutes
+  const [started, setStarted] = useState(false);
 
   useEffect(() => {
     if (currentStep >= startOnStep && !started) {
-      setStarted(true)
+      setStarted(true);
     }
-  }, [currentStep, startOnStep, started])
+  }, [currentStep, startOnStep, started]);
 
   useEffect(() => {
-    if (!started) return
+    if (!started) return;
     const interval = setInterval(() => {
-      setSecondsLeft((prev) => (prev <= 0 ? 0 : prev - 1))
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [started])
+      setSecondsLeft((prev) => (prev <= 0 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [started]);
 
-  const minutes = Math.floor(secondsLeft / 60)
-  const seconds = secondsLeft % 60
-  return { minutes, seconds, expired: secondsLeft <= 0, started }
+  const minutes = Math.floor(secondsLeft / 60);
+  const seconds = secondsLeft % 60;
+  return { minutes, seconds, expired: secondsLeft <= 0, started };
 }
 
 /* ------------------------------------------------------------------ */
@@ -172,9 +230,9 @@ function StepSidebar({ currentStep }: { currentStep: number }) {
   return (
     <div className="flex flex-col items-center gap-0">
       {STEPS.map((step, index) => {
-        const isActive = index === currentStep
-        const isPast = index < currentStep
-        const Icon = step.icon
+        const isActive = index === currentStep;
+        const isPast = index < currentStep;
+        const Icon = step.icon;
 
         return (
           <div key={step.id} className="flex flex-col items-center">
@@ -187,7 +245,11 @@ function StepSidebar({ currentStep }: { currentStep: number }) {
                     : "border-border bg-card text-muted-foreground"
               }`}
             >
-              {isPast ? <Check className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
+              {isPast ? (
+                <Check className="h-5 w-5" />
+              ) : (
+                <Icon className="h-5 w-5" />
+              )}
             </div>
             <span
               className={`mt-1.5 max-w-[60px] text-center text-xs font-medium leading-tight ${
@@ -204,10 +266,10 @@ function StepSidebar({ currentStep }: { currentStep: number }) {
               />
             )}
           </div>
-        )
+        );
       })}
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -216,19 +278,28 @@ function StepSidebar({ currentStep }: { currentStep: number }) {
 
 function TicketCard({
   tier,
-  onAdd,
-  isAdded,
+  quantity,
+  onIncrease,
+  onDecrease,
+  canIncrease,
 }: {
-  tier: (typeof TICKET_TIERS)[number]
-  onAdd: () => void
-  isAdded: boolean
+  tier: TicketTierUI;
+  quantity: number;
+  onIncrease: () => void;
+  onDecrease: () => void;
+  canIncrease: boolean;
 }) {
+  const uiStatus = mapStatusToUI(tier.status);
+  const price = Number(tier.price);
+
   return (
     <div className="rounded-lg border border-border bg-card p-6">
       <div className="mb-3">
         <h3 className="text-lg font-bold text-foreground">{tier.name}</h3>
         {tier.tagline && (
-          <p className="mt-0.5 text-sm font-semibold text-foreground">{tier.tagline}</p>
+          <p className="mt-0.5 text-sm font-semibold text-foreground">
+            {tier.tagline}
+          </p>
         )}
         {tier.discount && (
           <p className="text-sm font-semibold text-primary">{tier.discount}</p>
@@ -236,7 +307,9 @@ function TicketCard({
         {tier.couponCode && (
           <p className="text-sm text-muted-foreground">
             {"USE Coupon Code: "}
-            <span className="font-medium text-foreground">{tier.couponCode}</span>
+            <span className="font-medium text-foreground">
+              {tier.couponCode}
+            </span>
           </p>
         )}
       </div>
@@ -247,10 +320,15 @@ function TicketCard({
       />
 
       <div className="mt-4">
-        <p className="text-sm font-medium text-foreground">{"Your ticket includes:"}</p>
+        <p className="text-sm font-medium text-foreground">
+          {"Your ticket includes:"}
+        </p>
         <ul className="mt-2 flex flex-col gap-1.5 pl-5">
-          {TICKET_FEATURES.map((feature) => (
-            <li key={feature} className="list-disc text-sm text-muted-foreground">
+          {tier.features.map((feature) => (
+            <li
+              key={feature}
+              className="list-disc text-sm text-muted-foreground"
+            >
               {feature}
             </li>
           ))}
@@ -258,36 +336,52 @@ function TicketCard({
       </div>
 
       <p className="mt-4 text-sm italic text-muted-foreground">
-        {"Check the website for the latest updates; the roadmap may change, as always."}
+        {
+          "Check the website for the latest updates; the roadmap may change, as always."
+        }
       </p>
 
       <div className="mt-4 flex items-center justify-between">
         <span className="text-xl font-bold text-foreground">
-          {"$ "}
-          {tier.price.toLocaleString("en-IN")}
+          {formatUSD(price)}
         </span>
 
-        {tier.status === "sold-out" && (
+        {uiStatus === "sold-out" && (
           <Button variant="outline" disabled className="min-w-[100px]">
             Sold Out
           </Button>
         )}
-        {tier.status === "available" && (
-          <Button
-            onClick={onAdd}
-            className="min-w-[100px]"
-          >
-            {isAdded ? "Added" : "Add"}
-          </Button>
+        {uiStatus === "available" && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onDecrease}
+              disabled={quantity <= 0}
+            >
+              -
+            </Button>
+            <span className="min-w-7 text-center text-sm font-semibold">
+              {quantity}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onIncrease}
+              disabled={!canIncrease}
+            >
+              +
+            </Button>
+          </div>
         )}
-        {tier.status === "coming-soon" && (
+        {uiStatus === "coming-soon" && (
           <Button variant="outline" disabled className="min-w-[100px]">
             Coming Soon
           </Button>
         )}
       </div>
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -295,66 +389,94 @@ function TicketCard({
 /* ------------------------------------------------------------------ */
 
 function CartSidebar({
+  ticketTiers,
   selectedTickets,
   discountCode,
   onDiscountCodeChange,
   onApplyDiscount,
   onProceed,
   proceedLabel,
-  showSummary,
+  appliedDiscount,
+  discountError,
+  isApplyingDiscount,
+  isProceedLoading,
+  isProceedDisabled,
 }: {
-  selectedTickets: SelectedTickets
-  discountCode: string
-  onDiscountCodeChange: (code: string) => void
-  onApplyDiscount: () => void
-  onProceed: () => void
-  proceedLabel: string
-  showSummary: boolean
+  ticketTiers: TicketTierUI[];
+  selectedTickets: SelectedTickets;
+  discountCode: string;
+  onDiscountCodeChange: (code: string) => void;
+  onApplyDiscount: () => void;
+  onProceed: () => void;
+  proceedLabel: string;
+  appliedDiscount: DiscountInfo | null;
+  discountError: string | null;
+  isApplyingDiscount: boolean;
+  isProceedLoading: boolean;
+  isProceedDisabled: boolean;
 }) {
-  const hasSelection = Object.values(selectedTickets).some((qty) => qty > 0)
-  const subTotal = TICKET_TIERS.reduce(
-    (sum, tier) => sum + tier.price * (selectedTickets[tier.id] || 0),
-    0
-  )
+  const hasSelection = Object.values(selectedTickets).some((qty) => qty > 0);
+  const subTotal = ticketTiers.reduce(
+    (sum, tier) => sum + Number(tier.price) * (selectedTickets[tier.slug] || 0),
+    0,
+  );
+
+  // Calculate discount amount
+  let discountAmount = 0;
+  if (appliedDiscount) {
+    const discountValue = Number(appliedDiscount.discountValue);
+    if (appliedDiscount.discountType === "PERCENTAGE") {
+      discountAmount = (subTotal * discountValue) / 100;
+    } else {
+      discountAmount = Math.min(discountValue, subTotal);
+    }
+  }
+  const total = subTotal - discountAmount;
 
   return (
     <div className="rounded-lg border border-border bg-card p-6">
-      {showSummary && hasSelection ? (
+      {hasSelection ? (
         <div className="w-full">
-          <p className="text-base font-bold text-foreground">{"Ticket Summary"}</p>
+          <p className="text-base font-bold text-foreground">
+            {"Ticket Summary"}
+          </p>
           <div className="mt-3 flex flex-col gap-2">
-            {TICKET_TIERS.filter((t) => (selectedTickets[t.id] || 0) > 0).map(
-              (tier) => (
-                <div key={tier.id} className="flex items-center justify-between text-sm">
+            {ticketTiers
+              .filter((t) => (selectedTickets[t.slug] || 0) > 0)
+              .map((tier) => (
+                <div
+                  key={tier.slug}
+                  className="flex items-center justify-between text-sm"
+                >
                   <span className="text-muted-foreground">
                     {tier.name}
                     <span className="ml-2 text-xs text-muted-foreground/70">
                       {"x "}
-                      {selectedTickets[tier.id]}
+                      {selectedTickets[tier.slug]}
                     </span>
                   </span>
                   <span className="font-medium text-foreground">
-                    {"₹ "}
-                    {(tier.price * (selectedTickets[tier.id] || 0)).toLocaleString(
-                      "en-IN"
+                    {formatUSD(
+                      Number(tier.price) * (selectedTickets[tier.slug] || 0),
                     )}
                   </span>
                 </div>
-              )
-            )}
+              ))}
             <div className="flex items-center justify-between text-sm text-muted-foreground">
               <span>{"Sub Total"}</span>
-              <span>
-                {"₹ "}
-                {subTotal.toLocaleString("en-IN")}
-              </span>
+              <span>{formatUSD(subTotal)}</span>
             </div>
+            {appliedDiscount && discountAmount > 0 && (
+              <div className="flex items-center justify-between text-sm text-green-600">
+                <span>{"Discount (" + appliedDiscount.code + ")"}</span>
+                <span>{"- " + formatUSD(discountAmount)}</span>
+              </div>
+            )}
             <div className="border-t border-border pt-2">
               <div className="flex items-center justify-between text-base font-bold">
                 <span className="text-foreground">{"Total"}</span>
                 <span className="text-foreground">
-                  {"₹ "}
-                  {subTotal.toLocaleString("en-IN")}
+                  {formatUSD(total)}
                   {"*"}
                 </span>
               </div>
@@ -368,29 +490,50 @@ function CartSidebar({
         <div className="flex flex-col items-center gap-3 text-center">
           <ShoppingCart className="h-12 w-12 text-muted-foreground/50" />
           <p className="text-sm text-muted-foreground">
-            {"You haven't selected any ticket. Select a ticket to see the ticket summary."}
+            {
+              "You haven't selected any ticket. Select a ticket to see the ticket summary."
+            }
           </p>
         </div>
       )}
 
       {/* Discount Code */}
       <div className="mt-6">
-        <p className="text-sm font-semibold text-foreground">{"Apply Discount Code"}</p>
+        <p className="text-sm font-semibold text-foreground">
+          {"Apply Discount Code"}
+        </p>
         <div className="mt-2 flex gap-2">
           <Input
             placeholder="Enter Code"
             value={discountCode}
             onChange={(e) => onDiscountCodeChange(e.target.value)}
             className="bg-card"
+            disabled={!!appliedDiscount}
           />
           <Button
             variant="outline"
             onClick={onApplyDiscount}
             className="shrink-0 bg-transparent"
+            disabled={isApplyingDiscount || !!appliedDiscount}
           >
-            Apply
+            {isApplyingDiscount ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : appliedDiscount ? (
+              <Check className="h-4 w-4" />
+            ) : (
+              "Apply"
+            )}
           </Button>
         </div>
+        {discountError && (
+          <p className="mt-1 text-xs text-destructive">{discountError}</p>
+        )}
+        {appliedDiscount && (
+          <p className="mt-1 text-xs text-green-600">
+            {"Discount applied: " +
+              (appliedDiscount.description || appliedDiscount.code)}
+          </p>
+        )}
       </div>
 
       {/* Proceed / Checkout Button */}
@@ -398,12 +541,15 @@ function CartSidebar({
         className="mt-4 w-full"
         size="lg"
         onClick={onProceed}
-        disabled={!hasSelection}
+        disabled={!hasSelection || isProceedLoading || isProceedDisabled}
       >
+        {isProceedLoading ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : null}
         {proceedLabel}
       </Button>
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -411,178 +557,566 @@ function CartSidebar({
 /* ------------------------------------------------------------------ */
 
 function AttendeeDetailsStep({
-  attendee,
-  onChange,
-  ticketName,
+  buyer,
+  onBuyerChange,
+  attendees,
+  onAttendeeChange,
+  ticketLabels,
 }: {
-  attendee: AttendeeData
-  onChange: (data: AttendeeData) => void
-  ticketName: string
+  buyer: BuyerData;
+  onBuyerChange: (data: BuyerData) => void;
+  attendees: AttendeeData[];
+  onAttendeeChange: (index: number, data: AttendeeData) => void;
+  ticketLabels: string[];
 }) {
-  function update(field: keyof AttendeeData, value: string | boolean) {
-    onChange({ ...attendee, [field]: value })
+  function updateBuyer(field: keyof BuyerData, value: string) {
+    onBuyerChange({ ...buyer, [field]: value });
+  }
+
+  const [expandedAttendees, setExpandedAttendees] = useState<number[]>(() =>
+    attendees.length > 0 ? [0] : [],
+  );
+
+  useEffect(() => {
+    setExpandedAttendees((prev) => {
+      const validIndexes = prev.filter((i) => i < attendees.length);
+      if (attendees.length === 0) return [];
+      if (validIndexes.length > 0) return validIndexes;
+      return [0];
+    });
+  }, [attendees.length]);
+
+  function toggleAttendee(index: number) {
+    setExpandedAttendees((prev) =>
+      prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index],
+    );
   }
 
   return (
-    <div className="rounded-lg border border-border bg-card p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-bold text-foreground">
-          {ticketName}
-          {" (1 of 1)"}
-        </h3>
-      </div>
+    <div className="flex flex-col gap-6">
+      <div className="rounded-lg border border-border bg-card p-6">
+        <h3 className="text-lg font-bold text-foreground">{"Buyer Details"}</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {"Invoice/receipt and order communication will use this information."}
+        </p>
 
-      {/* Form */}
-      <div className="mt-6 flex flex-col gap-5">
-        {/* Name */}
-        <div>
-          <label htmlFor="att-name" className="mb-1.5 block text-sm font-medium text-foreground">
-            {"Name*"}
-          </label>
-          <Input
-            id="att-name"
-            value={attendee.name}
-            onChange={(e) => update("name", e.target.value)}
-          />
-        </div>
+        <div className="mt-5 grid gap-5 md:grid-cols-2">
+          <div>
+            <label
+              htmlFor="buyer-full-name"
+              className="mb-1.5 block text-sm font-medium text-foreground"
+            >
+              {"Full Name*"}
+            </label>
+            <Input
+              id="buyer-full-name"
+              value={buyer.fullName}
+              onChange={(e) => updateBuyer("fullName", e.target.value)}
+            />
+          </div>
 
-        {/* Email */}
-        <div>
-          <label htmlFor="att-email" className="mb-1.5 block text-sm font-medium text-foreground">
-            {"Email Address*"}
-          </label>
-          <Input
-            id="att-email"
-            type="email"
-            value={attendee.email}
-            onChange={(e) => update("email", e.target.value)}
-          />
-        </div>
+          <div>
+            <label
+              htmlFor="buyer-email"
+              className="mb-1.5 block text-sm font-medium text-foreground"
+            >
+              {"Email Address*"}
+            </label>
+            <Input
+              id="buyer-email"
+              type="email"
+              value={buyer.email}
+              onChange={(e) => updateBuyer("email", e.target.value)}
+            />
+          </div>
 
-        {/* Country */}
-        <div>
-          <label className="mb-1.5 block text-sm font-medium text-foreground">{"Country*"}</label>
-          <Select value={attendee.country} onValueChange={(v) => update("country", v)}>
-            <SelectTrigger className="bg-card">
-              <SelectValue placeholder="Select a country" />
-            </SelectTrigger>
-            <SelectContent>
-              {COUNTRIES.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Job Title */}
-        <div>
-          <label htmlFor="att-job" className="mb-1.5 block text-sm font-medium text-foreground">
-            {"Job Title*"}
-          </label>
-          <Input
-            id="att-job"
-            value={attendee.jobTitle}
-            onChange={(e) => update("jobTitle", e.target.value)}
-          />
-        </div>
-
-        {/* Company */}
-        <div>
-          <label htmlFor="att-company" className="mb-1.5 block text-sm font-medium text-foreground">
-            {"Current Company/Organization/University*"}
-          </label>
-          <Input
-            id="att-company"
-            value={attendee.company}
-            onChange={(e) => update("company", e.target.value)}
-          />
-        </div>
-
-        {/* Industry */}
-        <div>
-          <label className="mb-1.5 block text-sm font-medium text-foreground">{"Industry*"}</label>
-          <Select value={attendee.industry} onValueChange={(v) => update("industry", v)}>
-            <SelectTrigger className="bg-card">
-              <SelectValue placeholder="Select" />
-            </SelectTrigger>
-            <SelectContent>
-              {INDUSTRIES.map((i) => (
-                <SelectItem key={i} value={i}>
-                  {i}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Organization Type */}
-        <div>
-          <label className="mb-1.5 block text-sm font-medium text-foreground">
-            {"I represent an organization that:*"}
-          </label>
-          <Select value={attendee.orgType} onValueChange={(v) => update("orgType", v)}>
-            <SelectTrigger className="bg-card">
-              <SelectValue placeholder="Select" />
-            </SelectTrigger>
-            <SelectContent>
-              {ORG_TYPES.map((o) => (
-                <SelectItem key={o} value={o}>
-                  {o}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Separator */}
-        <div className="border-t border-border" />
-
-        {/* CNCF Communications */}
-        <div className="flex gap-3">
-          <Checkbox
-            id="cncf-consent"
-            checked={attendee.cncfConsent}
-            onCheckedChange={(c) => update("cncfConsent", !!c)}
-            className="mt-0.5 shrink-0"
-          />
-          <label htmlFor="cncf-consent" className="text-sm leading-relaxed text-muted-foreground">
-            <span className="font-semibold text-foreground">{"CNCF Communications"}</span>
-            <br />
-            {
-              "In addition, if you check the check box to the left of this text, you further authorize KCD NAME and the Cloud Native Computing Foundation to contact you via email regarding other events and open source projects from time to time. You can unsubscribe from these additional email communications at any time by following the 'unsubscribe' instructions included within such communications or by sending an unsubscribe request to privacy@linuxfoundation.org."
-            }
-            <br />
-            {
-              "By submitting this registration you consent to The Cloud Native Computing Foundation's communication with you with respect to the event or services to which this registration pertains.*"
-            }
-          </label>
-        </div>
-
-        {/* WhatsApp updates */}
-        <div className="flex items-center gap-3">
-          <Checkbox
-            id="whatsapp-updates"
-            checked={attendee.whatsappUpdates}
-            onCheckedChange={(c) => update("whatsappUpdates", !!c)}
-          />
-          <label htmlFor="whatsapp-updates" className="text-sm text-muted-foreground">
-            {"I would like to receive ticket and event updates over WhatsApp"}
-          </label>
-        </div>
-
-        {/* Buyer Details toggle */}
-        <div className="rounded-md border border-border p-4">
-          <p className="text-sm text-muted-foreground">
-            <span className="font-semibold text-foreground">{"Buyer Details"}</span>
-            {" (Invoice/Receipt will be sent to the below details)"}
-          </p>
+          <div className="md:col-span-2">
+            <label
+              htmlFor="buyer-phone"
+              className="mb-1.5 block text-sm font-medium text-foreground"
+            >
+              {"Phone (Optional)"}
+            </label>
+            <Input
+              id="buyer-phone"
+              value={buyer.phone}
+              onChange={(e) => updateBuyer("phone", e.target.value)}
+            />
+          </div>
         </div>
       </div>
+
+      {attendees.map((attendee, index) => {
+        const attendeeNumber = index + 1;
+        const ticketLabel = ticketLabels[index] ?? `Ticket ${attendeeNumber}`;
+        const isExpanded = expandedAttendees.includes(index);
+
+        function updateAttendee(
+          field: keyof AttendeeData,
+          value: string | boolean,
+        ) {
+          onAttendeeChange(index, { ...attendee, [field]: value });
+        }
+
+        return (
+          <div
+            key={`${ticketLabel}-${attendeeNumber}`}
+            className="rounded-lg border border-border bg-card p-6"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-foreground">
+                {ticketLabel}
+                {" ("}
+                {attendeeNumber}
+                {" of "}
+                {attendees.length}
+                {")"}
+              </h3>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2"
+                onClick={() => toggleAttendee(index)}
+                aria-expanded={isExpanded}
+                aria-label={
+                  isExpanded
+                    ? "Collapse attendee details"
+                    : "Expand attendee details"
+                }
+              >
+                {isExpanded ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+
+            {isExpanded && (
+              <div className="mt-6 flex flex-col gap-5">
+                <div className="grid gap-5 md:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor={`att-first-name-${index}`}
+                      className="mb-1.5 block text-sm font-medium text-foreground"
+                    >
+                      {"First Name*"}
+                    </label>
+                    <Input
+                      id={`att-first-name-${index}`}
+                      value={attendee.firstName}
+                      onChange={(e) =>
+                        updateAttendee("firstName", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor={`att-last-name-${index}`}
+                      className="mb-1.5 block text-sm font-medium text-foreground"
+                    >
+                      {"Last Name*"}
+                    </label>
+                    <Input
+                      id={`att-last-name-${index}`}
+                      value={attendee.lastName}
+                      onChange={(e) =>
+                        updateAttendee("lastName", e.target.value)
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-email-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Email Address*"}
+                  </label>
+                  <Input
+                    id={`att-email-${index}`}
+                    type="email"
+                    value={attendee.email}
+                    onChange={(e) => updateAttendee("email", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">
+                    {"Country*"}
+                  </label>
+                  <Select
+                    value={attendee.country}
+                    onValueChange={(v) => updateAttendee("country", v)}
+                  >
+                    <SelectTrigger className="bg-card">
+                      <SelectValue placeholder="Select a country" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {COUNTRIES.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-job-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Job Title*"}
+                  </label>
+                  <Input
+                    id={`att-job-${index}`}
+                    value={attendee.jobTitle}
+                    onChange={(e) => updateAttendee("jobTitle", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-company-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Current Company/Organization/University*"}
+                  </label>
+                  <Input
+                    id={`att-company-${index}`}
+                    value={attendee.companyName}
+                    onChange={(e) =>
+                      updateAttendee("companyName", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-company-url-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Company URL"}
+                  </label>
+                  <Input
+                    id={`att-company-url-${index}`}
+                    value={attendee.companyUrl}
+                    onChange={(e) =>
+                      updateAttendee("companyUrl", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-work-address-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Work Address"}
+                  </label>
+                  <Input
+                    id={`att-work-address-${index}`}
+                    value={attendee.workAddress}
+                    onChange={(e) =>
+                      updateAttendee("workAddress", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-work-phone-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Work Phone"}
+                  </label>
+                  <Input
+                    id={`att-work-phone-${index}`}
+                    value={attendee.workPhone}
+                    onChange={(e) =>
+                      updateAttendee("workPhone", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-emergency-contact-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Emergency Contact"}
+                  </label>
+                  <Input
+                    id={`att-emergency-contact-${index}`}
+                    value={attendee.emergencyContact}
+                    onChange={(e) =>
+                      updateAttendee("emergencyContact", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-github-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"GitHub Handle"}
+                  </label>
+                  <Input
+                    id={`att-github-${index}`}
+                    value={attendee.githubHandle}
+                    onChange={(e) =>
+                      updateAttendee("githubHandle", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">
+                    {"Industry*"}
+                  </label>
+                  <Select
+                    value={attendee.industry}
+                    onValueChange={(v) => updateAttendee("industry", v)}
+                  >
+                    <SelectTrigger className="bg-card">
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {INDUSTRIES.map((i) => (
+                        <SelectItem key={i} value={i}>
+                          {i}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-org-represents-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Organization Represents*"}
+                  </label>
+                  <Input
+                    id={`att-org-represents-${index}`}
+                    value={attendee.organizationRepresents}
+                    onChange={(e) =>
+                      updateAttendee("organizationRepresents", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">
+                    {"I represent an organization that:"}
+                  </label>
+                  <Select
+                    value={attendee.organizationType}
+                    onValueChange={(v) => updateAttendee("organizationType", v)}
+                  >
+                    <SelectTrigger className="bg-card">
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ORG_TYPES.map((o) => (
+                        <SelectItem key={o} value={o}>
+                          {o}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-primary-role-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Primary Role"}
+                  </label>
+                  <Input
+                    id={`att-primary-role-${index}`}
+                    value={attendee.primaryRole}
+                    onChange={(e) =>
+                      updateAttendee("primaryRole", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">
+                    {"Is this your first KCD?"}
+                  </label>
+                  <Select
+                    value={attendee.firstTimeKcd}
+                    onValueChange={(v) => updateAttendee("firstTimeKcd", v)}
+                  >
+                    <SelectTrigger className="bg-card">
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="yes">Yes</SelectItem>
+                      <SelectItem value="no">No</SelectItem>
+                      <SelectItem value="skip">Prefer not to say</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-shirt-size-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Shirt Size"}
+                  </label>
+                  <Input
+                    id={`att-shirt-size-${index}`}
+                    value={attendee.shirtSize}
+                    onChange={(e) =>
+                      updateAttendee("shirtSize", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-dietary-needs-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Dietary Needs"}
+                  </label>
+                  <Input
+                    id={`att-dietary-needs-${index}`}
+                    value={attendee.dietaryNeeds}
+                    onChange={(e) =>
+                      updateAttendee("dietaryNeeds", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">
+                    {"Disability Accommodation Needed?"}
+                  </label>
+                  <Select
+                    value={attendee.disabilityAccommodation}
+                    onValueChange={(v) =>
+                      updateAttendee("disabilityAccommodation", v)
+                    }
+                  >
+                    <SelectTrigger className="bg-card">
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="yes">Yes</SelectItem>
+                      <SelectItem value="no">No</SelectItem>
+                      <SelectItem value="skip">Prefer not to say</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-person-of-color-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Person of Color"}
+                  </label>
+                  <Input
+                    id={`att-person-of-color-${index}`}
+                    value={attendee.personOfColor}
+                    onChange={(e) =>
+                      updateAttendee("personOfColor", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-gender-identity-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Gender Identity"}
+                  </label>
+                  <Input
+                    id={`att-gender-identity-${index}`}
+                    value={attendee.genderIdentity}
+                    onChange={(e) =>
+                      updateAttendee("genderIdentity", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={`att-age-range-${index}`}
+                    className="mb-1.5 block text-sm font-medium text-foreground"
+                  >
+                    {"Age Range"}
+                  </label>
+                  <Input
+                    id={`att-age-range-${index}`}
+                    value={attendee.ageRange}
+                    onChange={(e) => updateAttendee("ageRange", e.target.value)}
+                  />
+                </div>
+
+                <div className="border-t border-border" />
+
+                <div className="flex gap-3">
+                  <Checkbox
+                    id={`cncf-consent-${index}`}
+                    checked={attendee.cncfConsent}
+                    onCheckedChange={(c) => updateAttendee("cncfConsent", !!c)}
+                    className="mt-0.5 shrink-0"
+                  />
+                  <label
+                    htmlFor={`cncf-consent-${index}`}
+                    className="text-sm leading-relaxed text-muted-foreground"
+                  >
+                    <span className="font-semibold text-foreground">
+                      {"CNCF Communications"}
+                    </span>
+                    <br />
+                    {
+                      "In addition, if you check the check box to the left of this text, you further authorize KCD NAME and the Cloud Native Computing Foundation to contact you via email regarding other events and open source projects from time to time. You can unsubscribe from these additional email communications at any time by following the 'unsubscribe' instructions included within such communications or by sending an unsubscribe request to privacy@linuxfoundation.org."
+                    }
+                    <br />
+                    {
+                      "By submitting this registration you consent to The Cloud Native Computing Foundation's communication with you with respect to the event or services to which this registration pertains.*"
+                    }
+                  </label>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <Checkbox
+                    id={`sponsor-opt-in-${index}`}
+                    checked={attendee.sponsorCommunicationsOptIn}
+                    onCheckedChange={(c) =>
+                      updateAttendee("sponsorCommunicationsOptIn", !!c)
+                    }
+                  />
+                  <label
+                    htmlFor={`sponsor-opt-in-${index}`}
+                    className="text-sm text-muted-foreground"
+                  >
+                    {
+                      "I would like to receive ticket and event updates over WhatsApp"
+                    }
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -591,102 +1125,346 @@ function AttendeeDetailsStep({
 
 function PaymentStep({
   onBack,
-  selectedTickets,
+  total,
+  orderId,
+  onPay,
+  isPayLoading,
 }: {
-  onBack: () => void
-  selectedTickets: SelectedTickets
+  onBack: () => void;
+  total: number;
+  orderId: string | null;
+  onPay: () => void;
+  isPayLoading: boolean;
 }) {
-  const total = TICKET_TIERS.reduce(
-    (sum, tier) => sum + tier.price * (selectedTickets[tier.id] || 0),
-    0
-  )
-
   return (
     <div className="rounded-lg border border-border bg-card p-8 text-center">
       <CreditCard className="mx-auto h-14 w-14 text-primary" />
-      <h3 className="mt-4 text-xl font-bold text-foreground">{"Complete Your Payment"}</h3>
+      <h3 className="mt-4 text-xl font-bold text-foreground">
+        {"Complete Your Payment"}
+      </h3>
       <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-        {"You will be redirected to PagueloFacil's secure checkout to complete your payment of "}
+        {
+          "You will be redirected to PagueloFacil's secure checkout to complete your payment of "
+        }
         <span className="font-semibold text-foreground">
-          {"₹ "}
-          {total.toLocaleString("en-IN")}
+          {formatUSD(total)}
         </span>
         {"."}
       </p>
 
+      {orderId && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {"Order ID: "}
+          <span className="font-mono">{orderId.slice(0, 8)}...</span>
+        </p>
+      )}
+
       <div className="mx-auto mt-6 flex max-w-xs flex-col gap-3">
-        <Button asChild size="lg" className="gap-2">
-          <a href={PAGUELO_FACIL_URL} target="_blank" rel="noopener noreferrer">
-            {"Pay with PagueloFacil"}
-            <ExternalLink className="h-4 w-4" />
-          </a>
+        <Button
+          size="lg"
+          className="gap-2"
+          onClick={onPay}
+          disabled={isPayLoading}
+        >
+          {isPayLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <>
+              {"Pay with PagueloFacil"}
+              <ExternalLink className="h-4 w-4" />
+            </>
+          )}
         </Button>
-        <Button variant="outline" onClick={onBack}>
+        <Button variant="outline" onClick={onBack} disabled={isPayLoading}>
           Back
         </Button>
       </div>
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ */
 /*  Main Registration Flow                                             */
 /* ------------------------------------------------------------------ */
 
-export function RegistrationFlow() {
-  const [currentStep, setCurrentStep] = useState(0)
-  const [selectedTickets, setSelectedTickets] = useState<SelectedTickets>({})
-  const [discountCode, setDiscountCode] = useState("")
-  const [attendee, setAttendee] = useState<AttendeeData>({
-    name: "",
+export function RegistrationFlow({
+  ticketTiers,
+}: {
+  ticketTiers: TicketTierUI[];
+}) {
+  const [currentStep, setCurrentStep] = useState(0);
+  const [selectedTickets, setSelectedTickets] = useState<SelectedTickets>({});
+  const [discountCode, setDiscountCode] = useState("");
+  const [appliedDiscount, setAppliedDiscount] = useState<DiscountInfo | null>(
+    null,
+  );
+  const [discountError, setDiscountError] = useState<string | null>(null);
+  const [isApplyingDiscount, setIsApplyingDiscount] = useState(false);
+  const [isProceedLoading, setIsProceedLoading] = useState(false);
+  const [isPayLoading, setIsPayLoading] = useState(false);
+  const [orderId, setOrderId] = useState<string | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const [buyer, setBuyer] = useState<BuyerData>({
+    fullName: "",
     email: "",
-    country: "",
-    jobTitle: "",
-    company: "",
-    industry: "",
-    orgType: "",
-    cncfConsent: false,
-    whatsappUpdates: false,
-  })
+    phone: "",
+  });
+  const [attendees, setAttendees] = useState<AttendeeData[]>([]);
 
-  const timer = useSessionTimer(1, currentStep)
+  const timer = useSessionTimer(1, currentStep);
 
-  function toggleTicket(id: string) {
-    setSelectedTickets((prev) => ({
-      ...prev,
-      [id]: prev[id] ? 0 : 1,
-    }))
+  const totalSelectedTickets = Object.values(selectedTickets).reduce(
+    (sum, qty) => sum + qty,
+    0,
+  );
+  const hasSelection = totalSelectedTickets > 0;
+
+  function updateTicketQuantity(slug: string, change: 1 | -1) {
+    setSelectedTickets((prev) => {
+      const currentQty = prev[slug] || 0;
+      const nextQty = Math.max(0, currentQty + change);
+      const currentTotal = Object.values(prev).reduce(
+        (sum, qty) => sum + qty,
+        0,
+      );
+      const nextTotal = currentTotal - currentQty + nextQty;
+
+      if (nextTotal > MAX_TICKETS_PER_BUYER) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [slug]: nextQty,
+      };
+    });
+
+    // Clear discount when selection changes
+    setAppliedDiscount(null);
+    setDiscountError(null);
   }
 
-  const hasSelection = Object.values(selectedTickets).some((q) => q > 0)
+  const selectedSlugs = Object.entries(selectedTickets)
+    .filter(([, qty]) => qty > 0)
+    .map(([slug]) => slug);
 
-  const selectedTierName =
-    TICKET_TIERS.find((t) => (selectedTickets[t.id] || 0) > 0)?.name ?? ""
+  const selectedTicketLabels = useMemo(
+    () =>
+      ticketTiers.flatMap((tier) =>
+        Array.from(
+          { length: selectedTickets[tier.slug] || 0 },
+          () => tier.name,
+        ),
+      ),
+    [ticketTiers, selectedTickets],
+  );
 
-  const isAttendeeValid =
-    attendee.name.trim() !== "" &&
-    attendee.email.trim() !== "" &&
-    attendee.country !== "" &&
-    attendee.jobTitle.trim() !== "" &&
-    attendee.company.trim() !== "" &&
-    attendee.industry !== "" &&
-    attendee.orgType !== ""
+  useEffect(() => {
+    const requiredAttendees = totalSelectedTickets;
+    setAttendees((prev) => {
+      if (prev.length === requiredAttendees) {
+        return prev;
+      }
 
-  const handleProceed = useCallback(() => {
-    if (currentStep === 0 && hasSelection) {
-      setCurrentStep(1)
-    } else if (currentStep === 1 && isAttendeeValid) {
-      setCurrentStep(2)
+      if (prev.length > requiredAttendees) {
+        return prev.slice(0, requiredAttendees);
+      }
+
+      return [
+        ...prev,
+        ...Array.from(
+          { length: requiredAttendees - prev.length },
+          createEmptyAttendee,
+        ),
+      ];
+    });
+  }, [totalSelectedTickets]);
+
+  function updateAttendee(index: number, data: AttendeeData) {
+    setAttendees((prev) =>
+      prev.map((attendee, i) => (i === index ? data : attendee)),
+    );
+  }
+
+  const isBuyerValid =
+    buyer.fullName.trim() !== "" && buyer.email.trim() !== "";
+
+  const areAttendeesValid = attendees.every(
+    (attendee) =>
+      attendee.firstName.trim() !== "" &&
+      attendee.lastName.trim() !== "" &&
+      attendee.email.trim() !== "" &&
+      attendee.country !== "" &&
+      attendee.jobTitle.trim() !== "" &&
+      attendee.companyName.trim() !== "" &&
+      attendee.industry !== "" &&
+      attendee.organizationRepresents.trim() !== "",
+  );
+  const isDetailsStepValid =
+    isBuyerValid &&
+    areAttendeesValid &&
+    attendees.length === totalSelectedTickets;
+
+  // Calculate totals
+  const subTotal = ticketTiers.reduce(
+    (sum, tier) => sum + Number(tier.price) * (selectedTickets[tier.slug] || 0),
+    0,
+  );
+  let discountAmount = 0;
+  if (appliedDiscount) {
+    const discountValue = Number(appliedDiscount.discountValue);
+    if (appliedDiscount.discountType === "PERCENTAGE") {
+      discountAmount = (subTotal * discountValue) / 100;
+    } else {
+      discountAmount = Math.min(discountValue, subTotal);
     }
-  }, [currentStep, hasSelection, isAttendeeValid])
+  }
+  const total = subTotal - discountAmount;
+
+  // Handle discount code application
+  const handleApplyDiscount = useCallback(async () => {
+    if (!discountCode.trim()) {
+      setDiscountError("Please enter a discount code");
+      return;
+    }
+
+    setIsApplyingDiscount(true);
+    setDiscountError(null);
+
+    try {
+      const result = await validateDiscountCode(discountCode, selectedSlugs);
+      if (result.valid && result.discount) {
+        setAppliedDiscount({
+          code: result.discount.code,
+          discountType: result.discount.discountType,
+          discountValue: result.discount.discountValue,
+          description: result.discount.description,
+        });
+        setDiscountError(null);
+      } else {
+        setDiscountError(result.error || "Invalid discount code");
+      }
+    } catch {
+      setDiscountError("Failed to validate discount code");
+    } finally {
+      setIsApplyingDiscount(false);
+    }
+  }, [discountCode, selectedSlugs]);
+
+  // Handle proceed to next step
+  const handleProceed = useCallback(async () => {
+    setOrderError(null);
+
+    if (currentStep === 0 && hasSelection) {
+      setCurrentStep(1);
+    } else if (currentStep === 1 && isDetailsStepValid) {
+      // Create order when proceeding to payment
+      setIsProceedLoading(true);
+      try {
+        const createOrderPayload = {
+          selectedTickets,
+          buyer,
+          attendees: attendees.map((item) => ({
+            firstName: item.firstName,
+            lastName: item.lastName,
+            email: item.email,
+            country: item.country,
+            jobTitle: item.jobTitle,
+            companyName: item.companyName,
+            companyUrl: item.companyUrl || undefined,
+            workAddress: item.workAddress || undefined,
+            workPhone: item.workPhone || undefined,
+            emergencyContact: item.emergencyContact || undefined,
+            githubHandle: item.githubHandle || undefined,
+            industry: item.industry,
+            primaryRole: item.primaryRole || undefined,
+            organizationRepresents: item.organizationRepresents,
+            organizationType: item.organizationType || undefined,
+            firstTimeKcd:
+              item.firstTimeKcd === "yes"
+                ? true
+                : item.firstTimeKcd === "no"
+                  ? false
+                  : undefined,
+            shirtSize: item.shirtSize || undefined,
+            dietaryNeeds: item.dietaryNeeds || undefined,
+            disabilityAccommodation:
+              item.disabilityAccommodation === "yes"
+                ? true
+                : item.disabilityAccommodation === "no"
+                  ? false
+                  : undefined,
+            personOfColor: item.personOfColor || undefined,
+            genderIdentity: item.genderIdentity || undefined,
+            ageRange: item.ageRange || undefined,
+            cncfConsent: item.cncfConsent,
+            sponsorCommunicationsOptIn: item.sponsorCommunicationsOptIn,
+          })),
+          discountCode: appliedDiscount?.code,
+        };
+        const result = await createOrder(createOrderPayload);
+
+        if (result.success && result.orderId) {
+          setOrderId(result.orderId);
+          setCurrentStep(2);
+        } else {
+          setOrderError(result.error || "Failed to create order");
+        }
+      } catch {
+        setOrderError("An error occurred while creating your order");
+      } finally {
+        setIsProceedLoading(false);
+      }
+    }
+  }, [
+    currentStep,
+    hasSelection,
+    isDetailsStepValid,
+    selectedTickets,
+    attendees,
+    buyer,
+    appliedDiscount,
+  ]);
+
+  // Handle payment redirect
+  const handlePay = useCallback(async () => {
+    if (!orderId) return;
+
+    setIsPayLoading(true);
+    setOrderError(null);
+    try {
+      const payment = await createPaymentUrl(orderId);
+      if (!payment.success || !payment.url) {
+        const message =
+          payment.error || "Failed to initialize payment. Please try again.";
+        setOrderError(message);
+        window.alert("We could not start payment. Please try again.");
+        return;
+      }
+
+      // Update order status to awaiting payment
+      const statusResult = await updateOrderToAwaitingPayment(orderId);
+      if (!statusResult.success) {
+        const message =
+          statusResult.error ||
+          "Failed to initialize payment. Please try again.";
+        setOrderError(message);
+        window.alert("We could not start payment. Please try again.");
+        return;
+      }
+
+      // Redirect user to payment provider URL
+      window.location.assign(payment.url);
+    } catch {
+      setOrderError("Failed to initiate payment. Please try again.");
+      window.alert("We could not start payment. Please try again.");
+    } finally {
+      setIsPayLoading(false);
+    }
+  }, [orderId]);
 
   const proceedLabel =
-    currentStep === 0 ? "Proceed" : currentStep === 1 ? "Checkout" : "Pay Now"
-
-  const total = TICKET_TIERS.reduce(
-    (sum, tier) => sum + tier.price * (selectedTickets[tier.id] || 0),
-    0
-  )
+    currentStep === 0 ? "Proceed" : currentStep === 1 ? "Checkout" : "Pay Now";
 
   return (
     <div className="min-h-screen bg-background">
@@ -702,9 +1480,13 @@ export function RegistrationFlow() {
               <ArrowLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-lg font-bold text-foreground">{"KCD Delhi 2026"}</h1>
+              <h1 className="text-lg font-bold text-foreground">
+                {"KCD Panama 2026"}
+              </h1>
               <p className="text-sm text-muted-foreground">
-                {"Feb 21st, 2026 at 8:00 AM (GMT+05:30) to Feb 21st, 2026 at 6:00 PM (GMT+05:30)"}
+                {
+                  "Apr 21st, 2026 at 8:00 AM (GMT-5) to Apr 23rd, 2026 at 6:00 PM (GMT-5)"
+                }
               </p>
             </div>
           </div>
@@ -732,6 +1514,13 @@ export function RegistrationFlow() {
 
       {/* Main Content */}
       <div className="mx-auto max-w-7xl px-4 py-8 lg:px-8">
+        {/* Order Error Alert */}
+        {orderError && (
+          <div className="mb-6 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+            {orderError}
+          </div>
+        )}
+
         <div className="flex gap-6 lg:gap-10">
           {/* Left: Step Indicator */}
           <div className="hidden shrink-0 md:block">
@@ -743,9 +1532,9 @@ export function RegistrationFlow() {
             {/* Mobile Step Indicator */}
             <div className="mb-6 flex items-center justify-center gap-4 md:hidden">
               {STEPS.map((step, index) => {
-                const isActive = index === currentStep
-                const isPast = index < currentStep
-                const Icon = step.icon
+                const isActive = index === currentStep;
+                const isPast = index < currentStep;
+                const Icon = step.icon;
                 return (
                   <div key={step.id} className="flex items-center gap-2">
                     <div
@@ -769,30 +1558,39 @@ export function RegistrationFlow() {
                       />
                     )}
                   </div>
-                )
+                );
               })}
             </div>
 
             {/* Step: Pick Tickets */}
             {currentStep === 0 && (
               <div className="flex flex-col gap-6">
-                {TICKET_TIERS.map((tier) => (
+                {ticketTiers.map((tier) => (
                   <TicketCard
-                    key={tier.id}
+                    key={tier.slug}
                     tier={tier}
-                    isAdded={(selectedTickets[tier.id] || 0) > 0}
-                    onAdd={() => toggleTicket(tier.id)}
+                    quantity={selectedTickets[tier.slug] || 0}
+                    onIncrease={() => updateTicketQuantity(tier.slug, 1)}
+                    onDecrease={() => updateTicketQuantity(tier.slug, -1)}
+                    canIncrease={totalSelectedTickets < MAX_TICKETS_PER_BUYER}
                   />
                 ))}
+                <p className="text-sm text-muted-foreground">
+                  {"A buyer can purchase up to "}
+                  {MAX_TICKETS_PER_BUYER}
+                  {" tickets in one order."}
+                </p>
               </div>
             )}
 
             {/* Step: Attendee Details */}
             {currentStep === 1 && (
               <AttendeeDetailsStep
-                attendee={attendee}
-                onChange={setAttendee}
-                ticketName={selectedTierName}
+                buyer={buyer}
+                onBuyerChange={setBuyer}
+                attendees={attendees}
+                onAttendeeChange={updateAttendee}
+                ticketLabels={selectedTicketLabels}
               />
             )}
 
@@ -800,7 +1598,10 @@ export function RegistrationFlow() {
             {currentStep === 2 && (
               <PaymentStep
                 onBack={() => setCurrentStep(1)}
-                selectedTickets={selectedTickets}
+                total={total}
+                orderId={orderId}
+                onPay={handlePay}
+                isPayLoading={isPayLoading}
               />
             )}
           </div>
@@ -809,17 +1610,20 @@ export function RegistrationFlow() {
           <div className="hidden w-72 shrink-0 lg:block">
             <div className="sticky top-8">
               <CartSidebar
+                ticketTiers={ticketTiers}
                 selectedTickets={selectedTickets}
                 discountCode={discountCode}
                 onDiscountCodeChange={setDiscountCode}
-                onApplyDiscount={() => {}}
-                onProceed={
-                  currentStep === 2
-                    ? () => window.open(PAGUELO_FACIL_URL, "_blank")
-                    : handleProceed
-                }
+                onApplyDiscount={handleApplyDiscount}
+                onProceed={currentStep === 2 ? handlePay : handleProceed}
                 proceedLabel={proceedLabel}
-                showSummary={currentStep >= 1}
+                appliedDiscount={appliedDiscount}
+                discountError={discountError}
+                isApplyingDiscount={isApplyingDiscount}
+                isProceedLoading={isProceedLoading || isPayLoading}
+                isProceedDisabled={
+                  currentStep === 1 ? !isDetailsStepValid : false
+                }
               />
             </div>
           </div>
@@ -832,8 +1636,7 @@ export function RegistrationFlow() {
               {hasSelection ? (
                 <div>
                   <p className="text-sm font-semibold text-foreground">
-                    {"₹ "}
-                    {total.toLocaleString("en-IN")}
+                    {formatUSD(total)}
                   </p>
                   {currentStep >= 1 && (
                     <p className="text-xs text-muted-foreground">
@@ -842,24 +1645,35 @@ export function RegistrationFlow() {
                   )}
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">{"No tickets selected"}</p>
+                <p className="text-sm text-muted-foreground">
+                  {"No tickets selected"}
+                </p>
               )}
             </div>
             {currentStep === 2 ? (
-              <Button size="sm" asChild>
-                <a href={PAGUELO_FACIL_URL} target="_blank" rel="noopener noreferrer">
-                  {"Pay Now"}
-                </a>
+              <Button size="sm" onClick={handlePay} disabled={isPayLoading}>
+                {isPayLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Pay Now"
+                )}
               </Button>
             ) : (
               <Button
                 size="sm"
                 disabled={
-                  currentStep === 0 ? !hasSelection : !isAttendeeValid
+                  (currentStep === 0 ? !hasSelection : !isDetailsStepValid) ||
+                  isProceedLoading
                 }
                 onClick={handleProceed}
               >
-                {currentStep === 0 ? "Proceed" : "Checkout"}
+                {isProceedLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : currentStep === 0 ? (
+                  "Proceed"
+                ) : (
+                  "Checkout"
+                )}
               </Button>
             )}
           </div>
@@ -867,10 +1681,7 @@ export function RegistrationFlow() {
       </div>
 
       {/* Footer */}
-      <div className="border-t border-border py-6 text-center">
-        <p className="text-xs text-muted-foreground">{"Powered By"}</p>
-        <p className="text-sm font-bold text-foreground">{"KONFHUB"}</p>
-      </div>
+      <div className="border-t border-border py-6 text-center"></div>
     </div>
-  )
+  );
 }

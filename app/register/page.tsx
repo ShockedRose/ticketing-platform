@@ -1,5 +1,8 @@
-import { RegistrationFlow } from "@/components/registration-flow"
+import { RegistrationFlow } from "@/components/registration-flow";
+import { getTicketTiers } from "@/lib/actions/ticket.actions";
 
-export default function RegisterPage() {
-  return <RegistrationFlow />
+export default async function RegisterPage() {
+  const ticketTypes = await getTicketTiers();
+
+  return <RegistrationFlow ticketTiers={ticketTypes} />;
 }
