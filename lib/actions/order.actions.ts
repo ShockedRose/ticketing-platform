@@ -2,6 +2,7 @@
 
 import { prisma } from "@/db/prisma";
 import { revalidatePath } from "next/cache";
+import { environment } from "@/lib/constants/environment";
 
 const ORDER_EXPIRATION_MINUTES = 10;
 const MAX_TICKETS_PER_ORDER = 5;
@@ -114,7 +115,7 @@ export type OrderWithDetails = {
   } | null;
 };
 
-class CreateOrderValidationError extends Error {}
+class CreateOrderValidationError extends Error { }
 
 function normalizeStatus(status: string): OrderStatus {
   const normalized = status.toLowerCase();
@@ -602,10 +603,10 @@ export async function createPaymentUrl(
   orderId: string
 ): Promise<{ success: boolean; url?: string; error?: string }> {
   try {
-    const cclw = process.env.PAGUELOFACIL_CCLW;
-    const returnUrl = process.env.PAGUELOFACIL_RETURN_URL;
+    const cclw = environment.PAGUELOFACIL_CCLW;
+    const returnUrl = environment.PAGUELOFACIL_RETURN_URL;
     const baseUrl =
-      process.env.PAGUELOFACIL_BASE_URL ?? "https://sandbox.paguelofacil.com";
+      environment.PAGUELOFACIL_BASE_URL
 
     if (!cclw || !returnUrl) {
       return {
@@ -662,6 +663,7 @@ export async function createPaymentUrl(
       RETURN_URL: returnUrl,
       EXPIRES_IN: "3600",
       CTAX: taxAmount.toFixed(2),
+      orderId: order.id.toString(),
     });
 
     const response = await fetch(`${baseUrl}/LinkDeamon.cfm`, {
@@ -688,15 +690,17 @@ export async function createPaymentUrl(
       };
     }
 
-    await prisma.payment.create({
-      data: {
-        order_id: orderIdAsBigInt,
-        provider: "PagueloFacil",
-        provider_reference: payload.data?.code ?? null,
-        status: "initiated",
-        amount: order.total_amount,
-        currency: order.currency,
-      },
+    await prisma.$transaction(async (tx) => {
+      await tx.payment.create({
+        data: {
+          order_id: orderIdAsBigInt,
+          provider: "PagueloFacil",
+          provider_reference: payload.data?.code ?? null,
+          status: "initiated",
+          amount: order.total_amount,
+          currency: order.currency,
+        },
+      });
     });
 
     return { success: true, url: paymentUrl };
@@ -898,10 +902,10 @@ export async function getOrderById(
     })),
     discountCode: order.promo_code
       ? {
-          code: order.promo_code.code,
-          discountType: order.promo_code.discount_type,
-          discountValue: order.promo_code.discount_value.toString(),
-        }
+        code: order.promo_code.code,
+        discountType: order.promo_code.discount_type,
+        discountValue: order.promo_code.discount_value.toString(),
+      }
       : null,
   };
 }
