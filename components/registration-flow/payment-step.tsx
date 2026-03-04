@@ -41,13 +41,6 @@ export function PaymentStep({
         .
       </p>
 
-      {orderId && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          {dictionary.orderIdPrefix}
-          <span className="font-mono">{orderId.slice(0, 8)}...</span>
-        </p>
-      )}
-
       <div className="mx-auto mt-6 flex max-w-xs flex-col gap-3">
         <Button
           size="lg"
