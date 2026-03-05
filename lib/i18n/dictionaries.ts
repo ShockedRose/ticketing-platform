@@ -195,6 +195,7 @@ const dictionaries = {
     registration: {
       errors: {
         discountCodeRequired: "Please enter a discount code",
+        discountOnlyInPayment: "Discount codes can only be applied during payment",
         invalidDiscountCode: "Invalid discount code",
         validateDiscountFailed: "Failed to validate discount code",
         createOrderFailed: "Failed to create order",
@@ -202,11 +203,14 @@ const dictionaries = {
         initPaymentFailed: "Failed to initialize payment. Please try again.",
         initPaymentUnexpected: "Failed to initiate payment. Please try again.",
         initPaymentAlert: "We could not start payment. Please try again.",
+        processOrderFailed: "Failed to process this order. Please try again.",
+        processOrderAlert: "We could not process your order. Please try again.",
       },
       proceed: {
         proceed: "Proceed",
         checkout: "Checkout",
         payNow: "Pay Now",
+        processOrder: "Process Order",
       },
       header: {
         backToEventAria: "Back to event page",
@@ -295,6 +299,8 @@ const dictionaries = {
         title: "Complete Your Payment",
         descriptionPrefix:
           "You will be redirected to PagueloFacil's secure checkout to complete your payment of ",
+        zeroTotalDescriptionPrefix:
+          "Your order total is ",
         orderIdPrefix: "Order ID: ",
         payWithProvider: "Pay with PagueloFacil",
         back: "Back",
@@ -503,6 +509,8 @@ const dictionaries = {
     registration: {
       errors: {
         discountCodeRequired: "Por favor ingresa un código de descuento",
+        discountOnlyInPayment:
+          "Los códigos de descuento solo se pueden aplicar durante el pago",
         invalidDiscountCode: "Código de descuento inválido",
         validateDiscountFailed: "No se pudo validar el código de descuento",
         createOrderFailed: "No se pudo crear la orden",
@@ -510,11 +518,14 @@ const dictionaries = {
         initPaymentFailed: "No se pudo iniciar el pago. Inténtalo de nuevo.",
         initPaymentUnexpected: "No se pudo iniciar el pago. Inténtalo de nuevo.",
         initPaymentAlert: "No pudimos iniciar el pago. Inténtalo de nuevo.",
+        processOrderFailed: "No se pudo procesar la orden. Inténtalo de nuevo.",
+        processOrderAlert: "No pudimos procesar la orden. Inténtalo de nuevo.",
       },
       proceed: {
         proceed: "Continuar",
         checkout: "Finalizar",
         payNow: "Pagar Ahora",
+        processOrder: "Procesar Orden",
       },
       header: {
         backToEventAria: "Volver al evento",
@@ -603,6 +614,8 @@ const dictionaries = {
         title: "Completa Tu Pago",
         descriptionPrefix:
           "Serás redirigido al checkout seguro de PagueloFacil para completar tu pago de ",
+        zeroTotalDescriptionPrefix:
+          "El total de tu orden es ",
         orderIdPrefix: "ID de orden: ",
         payWithProvider: "Pagar con PagueloFacil",
         back: "Volver",

@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { ticketTypesSeed } from "./sample-data";
+import { promoCodesSeed, ticketTypesSeed } from "./sample-data";
 
 async function main() {
 	const prisma = new PrismaClient();
@@ -56,9 +56,10 @@ async function main() {
 	}
 
 	await prisma.ticket.createMany({ data: ticketsData });
+	await prisma.promoCode.createMany({ data: promoCodesSeed });
 
 	console.log(
-		`Database seeded successfully: ${ticketTypes.length} ticket types and ${ticketsData.length} tickets.`,
+		`Database seeded successfully: ${ticketTypes.length} ticket types, ${ticketsData.length} tickets, and ${promoCodesSeed.length} promo codes.`,
 	);
 
 	await prisma.$disconnect();

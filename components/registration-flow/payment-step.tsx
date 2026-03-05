@@ -8,15 +8,18 @@ interface PaymentStepProps {
   dictionary: {
     title: string;
     descriptionPrefix: string;
+    zeroTotalDescriptionPrefix: string;
     orderIdPrefix: string;
-    payWithProvider: string;
     back: string;
   };
   onBack: () => void;
   total: number;
   orderId: string | null;
-  onPay: () => void;
-  isPayLoading: boolean;
+  onPrimaryAction: () => void;
+  primaryActionLabel: string;
+  isPrimaryLoading: boolean;
+  isZeroTotalOrder?: boolean;
+  showExternalLinkIcon?: boolean;
 }
 
 export function PaymentStep({
@@ -24,9 +27,16 @@ export function PaymentStep({
   onBack,
   total,
   orderId,
-  onPay,
-  isPayLoading,
+  onPrimaryAction,
+  primaryActionLabel,
+  isPrimaryLoading,
+  isZeroTotalOrder = false,
+  showExternalLinkIcon = false,
 }: PaymentStepProps) {
+  const descriptionPrefix = isZeroTotalOrder
+    ? dictionary.zeroTotalDescriptionPrefix
+    : dictionary.descriptionPrefix;
+
   return (
     <div className="rounded-lg border border-border bg-card p-8 text-center">
       <CreditCard className="mx-auto h-14 w-14 text-primary" />
@@ -34,7 +44,7 @@ export function PaymentStep({
         {dictionary.title}
       </h3>
       <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-        {dictionary.descriptionPrefix}
+        {descriptionPrefix}
         <span className="font-semibold text-foreground">
           {formatUSD(total)}
         </span>
@@ -45,19 +55,19 @@ export function PaymentStep({
         <Button
           size="lg"
           className="gap-2"
-          onClick={onPay}
-          disabled={isPayLoading}
+          onClick={onPrimaryAction}
+          disabled={isPrimaryLoading}
         >
-          {isPayLoading ? (
+          {isPrimaryLoading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <>
-              {dictionary.payWithProvider}
-              <ExternalLink className="h-4 w-4" />
+              {primaryActionLabel}
+              {showExternalLinkIcon ? <ExternalLink className="h-4 w-4" /> : null}
             </>
           )}
         </Button>
-        <Button variant="outline" onClick={onBack} disabled={isPayLoading}>
+        <Button variant="outline" onClick={onBack} disabled={isPrimaryLoading}>
           {dictionary.back}
         </Button>
       </div>

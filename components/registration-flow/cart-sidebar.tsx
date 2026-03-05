@@ -30,6 +30,7 @@ interface CartSidebarProps {
   discountError: string | null;
   isApplyingDiscount: boolean;
   isProceedLoading: boolean;
+  showDiscountSection: boolean;
   isProceedDisabled: boolean;
 }
 
@@ -46,6 +47,7 @@ export function CartSidebar({
   discountError,
   isApplyingDiscount,
   isProceedLoading,
+  showDiscountSection,
   isProceedDisabled,
 }: CartSidebarProps) {
   const hasSelection = Object.values(selectedTickets).some((qty) => qty > 0);
@@ -130,44 +132,45 @@ export function CartSidebar({
         </div>
       )}
 
-      {/* Discount Code */}
-      <div className="mt-6">
-        <p className="text-sm font-semibold text-foreground">
-          {dictionary.applyDiscountTitle}
-        </p>
-        <div className="mt-2 flex gap-2">
-          <Input
-            placeholder={dictionary.enterCodePlaceholder}
-            value={discountCode}
-            onChange={(e) => onDiscountCodeChange(e.target.value)}
-            className="bg-card"
-            disabled={!!appliedDiscount}
-          />
-          <Button
-            variant="outline"
-            onClick={onApplyDiscount}
-            className="shrink-0 bg-transparent"
-            disabled={isApplyingDiscount || !!appliedDiscount}
-          >
-            {isApplyingDiscount ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : appliedDiscount ? (
-              <Check className="h-4 w-4" />
-            ) : (
-              dictionary.apply
-            )}
-          </Button>
-        </div>
-        {discountError && (
-          <p className="mt-1 text-xs text-destructive">{discountError}</p>
-        )}
-        {appliedDiscount && (
-          <p className="mt-1 text-xs text-green-600">
-            {dictionary.discountAppliedPrefix +
-              (appliedDiscount.description || appliedDiscount.code)}
+      {showDiscountSection && (
+        <div className="mt-6">
+          <p className="text-sm font-semibold text-foreground">
+            {dictionary.applyDiscountTitle}
           </p>
-        )}
-      </div>
+          <div className="mt-2 flex gap-2">
+            <Input
+              placeholder={dictionary.enterCodePlaceholder}
+              value={discountCode}
+              onChange={(e) => onDiscountCodeChange(e.target.value)}
+              className="bg-card"
+              disabled={!!appliedDiscount}
+            />
+            <Button
+              variant="outline"
+              onClick={onApplyDiscount}
+              className="shrink-0 bg-transparent"
+              disabled={isApplyingDiscount || !!appliedDiscount}
+            >
+              {isApplyingDiscount ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : appliedDiscount ? (
+                <Check className="h-4 w-4" />
+              ) : (
+                dictionary.apply
+              )}
+            </Button>
+          </div>
+          {discountError && (
+            <p className="mt-1 text-xs text-destructive">{discountError}</p>
+          )}
+          {appliedDiscount && (
+            <p className="mt-1 text-xs text-green-600">
+              {dictionary.discountAppliedPrefix +
+                (appliedDiscount.description || appliedDiscount.code)}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Proceed / Checkout Button */}
       <Button

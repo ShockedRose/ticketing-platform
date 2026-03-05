@@ -49,13 +49,27 @@ export type CreateOrderInput = {
   selectedTickets: SelectedTickets;
   buyer: BuyerInput;
   attendees: AttendeeInput[];
-  discountCode?: string;
 };
 
 export type CreateOrderResult = {
   success: boolean;
   orderId?: string;
   error?: string;
+};
+
+type DiscountType = "PERCENTAGE" | "FIXED";
+
+export type RedeemOrderDiscountResult = {
+  success: boolean;
+  error?: string;
+  discount?: {
+    code: string;
+    discountType: DiscountType;
+    discountValue: string;
+  };
+  subtotalAmount?: string;
+  discountAmount?: string;
+  totalAmount?: string;
 };
 
 type PagueloFacilLinkResponse = {
@@ -145,7 +159,7 @@ export async function createOrder(
   input: CreateOrderInput
 ): Promise<CreateOrderResult> {
   try {
-    const { selectedTickets, buyer, attendees, discountCode } = input;
+    const { selectedTickets, buyer, attendees } = input;
 
     const selectedEntries = Object.entries(selectedTickets)
       .filter(([, qty]) => qty > 0)
@@ -268,46 +282,7 @@ export async function createOrder(
       subtotal += Number(ticketType.base_price) * entry.quantity;
     }
 
-    let discountAmount = 0;
-    let promoCodeRecord: {
-      id: bigint;
-      discount_type: string;
-      discount_value: unknown;
-      max_redemptions: number | null;
-      redemptions_count: number;
-      starts_at: Date | null;
-      ends_at: Date | null;
-      is_active: boolean;
-    } | null = null;
-
-    if (discountCode?.trim()) {
-      const code = discountCode.toUpperCase().trim();
-      const promo = await prisma.promoCode.findUnique({ where: { code } });
-      if (!promo) {
-        return { success: false, error: "Invalid discount code" };
-      }
-      if (!promo.is_active) {
-        return { success: false, error: "This discount code is no longer active" };
-      }
-      if (promo.max_redemptions !== null && promo.redemptions_count >= promo.max_redemptions) {
-        return { success: false, error: "Discount code has reached maximum redemptions" };
-      }
-      if (promo.starts_at && now < promo.starts_at) {
-        return { success: false, error: "Discount code is not yet valid" };
-      }
-      if (promo.ends_at && now > promo.ends_at) {
-        return { success: false, error: "Discount code has expired" };
-      }
-
-      const discountValue = Number(promo.discount_value);
-      const discountType = promo.discount_type.toUpperCase();
-      if (discountType === "PERCENTAGE") {
-        discountAmount = (subtotal * discountValue) / 100;
-      } else {
-        discountAmount = Math.min(discountValue, subtotal);
-      }
-      promoCodeRecord = promo;
-    }
+    const discountAmount = 0;
 
     const totalAmount = subtotal - discountAmount;
     const reservationExpiresAt = new Date(
@@ -332,7 +307,7 @@ export async function createOrder(
       const newOrder = await tx.order.create({
         data: {
           buyer_id: buyerRecord.id,
-          promo_code_id: promoCodeRecord?.id ?? null,
+          promo_code_id: null,
           order_status: "pending",
           subtotal_amount: subtotal,
           discount_amount: discountAmount,
@@ -432,23 +407,6 @@ export async function createOrder(
         }
       }
 
-      if (promoCodeRecord) {
-        await tx.promoCode.update({
-          where: { id: promoCodeRecord.id },
-          data: {
-            redemptions_count: { increment: 1 },
-          },
-        });
-
-        await tx.promoRedemption.create({
-          data: {
-            promo_code_id: promoCodeRecord.id,
-            order_id: newOrder.id,
-            buyer_id: buyerRecord.id,
-          },
-        });
-      }
-
       return newOrder;
     });
 
@@ -462,6 +420,136 @@ export async function createOrder(
     return {
       success: false,
       error: error instanceof Error ? error.message : "Failed to create order",
+    };
+  }
+}
+
+export async function redeemOrderDiscount(
+  orderId: string,
+  discountCode: string
+): Promise<RedeemOrderDiscountResult> {
+  try {
+    const code = discountCode.toUpperCase().trim();
+    if (!code) {
+      return { success: false, error: "Please enter a discount code" };
+    }
+
+    const orderIdAsBigInt = BigInt(orderId);
+    const now = new Date();
+
+    const result = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderIdAsBigInt },
+      });
+
+      if (!order) {
+        return { success: false, error: "Order not found" } as const;
+      }
+
+      const orderStatus = normalizeStatus(order.order_status);
+      if (orderStatus === "paid") {
+        return { success: false, error: "Order is already paid" } as const;
+      }
+
+      if (orderStatus === "cancelled" || orderStatus === "expired") {
+        return { success: false, error: "Order is no longer valid" } as const;
+      }
+
+      if (order.promo_code_id) {
+        return {
+          success: false,
+          error: "A discount code has already been applied to this order",
+        } as const;
+      }
+
+      const promo = await tx.promoCode.findUnique({
+        where: { code },
+      });
+
+      if (!promo) {
+        return { success: false, error: "Invalid discount code" } as const;
+      }
+
+      if (!promo.is_active) {
+        return {
+          success: false,
+          error: "This discount code is no longer active",
+        } as const;
+      }
+
+      if (
+        promo.max_redemptions !== null &&
+        promo.redemptions_count >= promo.max_redemptions
+      ) {
+        return {
+          success: false,
+          error: "Discount code has reached maximum redemptions",
+        } as const;
+      }
+
+      if (promo.starts_at && now < promo.starts_at) {
+        return { success: false, error: "Discount code is not yet valid" } as const;
+      }
+
+      if (promo.ends_at && now > promo.ends_at) {
+        return { success: false, error: "Discount code has expired" } as const;
+      }
+
+      const subtotalAmount = Number(order.subtotal_amount);
+      const discountValue = Number(promo.discount_value);
+      const discountType =
+        promo.discount_type.toUpperCase() === "PERCENTAGE"
+          ? "PERCENTAGE"
+          : "FIXED";
+      const discountAmount =
+        discountType === "PERCENTAGE"
+          ? (subtotalAmount * discountValue) / 100
+          : Math.min(discountValue, subtotalAmount);
+      const totalAmount = subtotalAmount - discountAmount;
+
+      const updatedOrder = await tx.order.update({
+        where: { id: order.id },
+        data: {
+          promo_code_id: promo.id,
+          discount_amount: discountAmount,
+          total_amount: totalAmount,
+          updated_at: new Date(),
+        },
+      });
+
+      await tx.promoCode.update({
+        where: { id: promo.id },
+        data: { redemptions_count: { increment: 1 } },
+      });
+
+      await tx.promoRedemption.create({
+        data: {
+          promo_code_id: promo.id,
+          order_id: order.id,
+          buyer_id: order.buyer_id,
+        },
+      });
+
+      return {
+        success: true,
+        discount: {
+          code: promo.code,
+          discountType,
+          discountValue: promo.discount_value.toString(),
+        },
+        subtotalAmount: updatedOrder.subtotal_amount.toString(),
+        discountAmount: updatedOrder.discount_amount.toString(),
+        totalAmount: updatedOrder.total_amount.toString(),
+      } as const;
+    });
+
+    return result;
+  } catch (error) {
+    console.error("Error redeeming discount code:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to redeem discount code",
     };
   }
 }
@@ -732,6 +820,51 @@ export async function createPaymentUrl(
       success: false,
       error:
         error instanceof Error ? error.message : "Failed to create payment URL",
+    };
+  }
+}
+
+export async function processZeroTotalOrder(
+  orderId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const orderIdAsBigInt = BigInt(orderId);
+    const order = await prisma.order.findUnique({
+      where: { id: orderIdAsBigInt },
+      select: {
+        id: true,
+        total_amount: true,
+        order_status: true,
+      },
+    });
+
+    if (!order) {
+      return { success: false, error: "Order not found" };
+    }
+
+    const orderStatus = normalizeStatus(order.order_status);
+    if (orderStatus === "cancelled" || orderStatus === "expired") {
+      return { success: false, error: "Order is no longer valid" };
+    }
+
+    if (Number(order.total_amount) > 0) {
+      return {
+        success: false,
+        error: "Only zero-total orders can be processed without payment",
+      };
+    }
+
+    return await updateOrderToPaid({
+      orderId,
+      paymentId: `PROMO-FREE-${orderId}-${Date.now()}`,
+      paymentMethod: "PROMO-FREE",
+    });
+  } catch (error) {
+    console.error("Error processing zero-total order:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to process order",
     };
   }
 }

@@ -7,9 +7,10 @@ import Link from "next/link";
 import {
   createOrder,
   createPaymentUrl,
+  processZeroTotalOrder,
+  redeemOrderDiscount,
   updateOrderToAwaitingPayment,
 } from "@/lib/actions/order.actions";
-import { validateDiscountCode } from "@/lib/actions/discount.actions";
 import { AttendeeDetailsStep } from "./attendee-details-step";
 import { CartSidebar } from "./cart-sidebar";
 import { MAX_TICKETS_PER_BUYER, STEPS } from "./constants";
@@ -55,6 +56,7 @@ export function RegistrationFlow({
   const [isApplyingDiscount, setIsApplyingDiscount] = useState(false);
   const [isProceedLoading, setIsProceedLoading] = useState(false);
   const [isPayLoading, setIsPayLoading] = useState(false);
+  const [isProcessOrderLoading, setIsProcessOrderLoading] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [orderError, setOrderError] = useState<string | null>(null);
   const [buyer, setBuyer] = useState<BuyerData>({
@@ -96,10 +98,6 @@ export function RegistrationFlow({
     setAppliedDiscount(null);
     setDiscountError(null);
   }
-
-  const selectedSlugs = Object.entries(selectedTickets)
-    .filter(([, qty]) => qty > 0)
-    .map(([slug]) => slug);
 
   const selectedTicketLabels = useMemo(
     () =>
@@ -173,8 +171,16 @@ export function RegistrationFlow({
   }
   const total = subTotal - discountAmount;
 
-  // Handle discount code application
   const handleApplyDiscount = useCallback(async () => {
+    if (currentStep !== 2 || !orderId) {
+      setDiscountError(dictionary.errors.discountOnlyInPayment);
+      return;
+    }
+
+    if (appliedDiscount) {
+      return;
+    }
+
     if (!discountCode.trim()) {
       setDiscountError(dictionary.errors.discountCodeRequired);
       return;
@@ -184,13 +190,13 @@ export function RegistrationFlow({
     setDiscountError(null);
 
     try {
-      const result = await validateDiscountCode(discountCode, selectedSlugs);
-      if (result.valid && result.discount) {
+      const result = await redeemOrderDiscount(orderId, discountCode);
+      if (result.success && result.discount) {
         setAppliedDiscount({
           code: result.discount.code,
           discountType: result.discount.discountType,
           discountValue: result.discount.discountValue,
-          description: result.discount.description,
+          description: null,
         });
         setDiscountError(null);
       } else {
@@ -201,7 +207,7 @@ export function RegistrationFlow({
     } finally {
       setIsApplyingDiscount(false);
     }
-  }, [discountCode, selectedSlugs, dictionary.errors]);
+  }, [currentStep, orderId, appliedDiscount, discountCode, dictionary.errors]);
 
   // Handle proceed to next step
   const handleProceed = useCallback(async () => {
@@ -252,11 +258,12 @@ export function RegistrationFlow({
             cncfConsent: item.cncfConsent,
             sponsorCommunicationsOptIn: item.sponsorCommunicationsOptIn,
           })),
-          discountCode: appliedDiscount?.code,
         };
         const result = await createOrder(createOrderPayload);
 
         if (result.success && result.orderId) {
+          setAppliedDiscount(null);
+          setDiscountError(null);
           setOrderId(result.orderId);
           setCurrentStep(2);
         } else {
@@ -275,7 +282,6 @@ export function RegistrationFlow({
     selectedTickets,
     attendees,
     buyer,
-    appliedDiscount,
     dictionary.errors.createOrderFailed,
     dictionary.errors.createOrderUnexpected,
   ]);
@@ -287,7 +293,7 @@ export function RegistrationFlow({
     setIsPayLoading(true);
     setOrderError(null);
     try {
-      const payment = await createPaymentUrl(orderId, lang);
+      const payment = await createPaymentUrl(orderId);
       if (!payment.success || !payment.url) {
         const message = payment.error || dictionary.errors.initPaymentFailed;
         setOrderError(message);
@@ -313,14 +319,40 @@ export function RegistrationFlow({
     } finally {
       setIsPayLoading(false);
     }
+  }, [orderId, dictionary.errors]);
+
+  const handleProcessOrder = useCallback(async () => {
+    if (!orderId) return;
+
+    setIsProcessOrderLoading(true);
+    setOrderError(null);
+    try {
+      const result = await processZeroTotalOrder(orderId);
+      if (!result.success) {
+        setOrderError(result.error || dictionary.errors.processOrderFailed);
+        window.alert(dictionary.errors.processOrderAlert);
+        return;
+      }
+
+      window.location.assign(`/${lang}/payments/status?success=true`);
+    } catch {
+      setOrderError(dictionary.errors.processOrderFailed);
+      window.alert(dictionary.errors.processOrderAlert);
+    } finally {
+      setIsProcessOrderLoading(false);
+    }
   }, [orderId, lang, dictionary.errors]);
+
+  const canProcessWithoutPayment = total <= 0;
 
   const proceedLabel =
     currentStep === 0
       ? dictionary.proceed.proceed
       : currentStep === 1
         ? dictionary.proceed.checkout
-        : dictionary.proceed.payNow;
+        : canProcessWithoutPayment
+          ? dictionary.proceed.processOrder
+          : dictionary.proceed.payNow;
 
   return (
     <div className="min-h-screen bg-background">
@@ -460,8 +492,13 @@ export function RegistrationFlow({
                 onBack={() => setCurrentStep(1)}
                 total={total}
                 orderId={orderId}
-                onPay={handlePay}
-                isPayLoading={isPayLoading}
+                onPrimaryAction={
+                  canProcessWithoutPayment ? handleProcessOrder : handlePay
+                }
+                primaryActionLabel={proceedLabel}
+                isPrimaryLoading={isPayLoading || isProcessOrderLoading}
+                isZeroTotalOrder={canProcessWithoutPayment}
+                showExternalLinkIcon={!canProcessWithoutPayment}
               />
             )}
           </div>
@@ -476,12 +513,21 @@ export function RegistrationFlow({
                 discountCode={discountCode}
                 onDiscountCodeChange={setDiscountCode}
                 onApplyDiscount={handleApplyDiscount}
-                onProceed={currentStep === 2 ? handlePay : handleProceed}
+                onProceed={
+                  currentStep === 2
+                    ? canProcessWithoutPayment
+                      ? handleProcessOrder
+                      : handlePay
+                    : handleProceed
+                }
                 proceedLabel={proceedLabel}
                 appliedDiscount={appliedDiscount}
                 discountError={discountError}
                 isApplyingDiscount={isApplyingDiscount}
-                isProceedLoading={isProceedLoading || isPayLoading}
+                isProceedLoading={
+                  isProceedLoading || isPayLoading || isProcessOrderLoading
+                }
+                showDiscountSection={currentStep === 2}
                 isProceedDisabled={
                   currentStep === 1 ? !isDetailsStepValid : false
                 }
@@ -512,11 +558,15 @@ export function RegistrationFlow({
               )}
             </div>
             {currentStep === 2 ? (
-              <Button size="sm" onClick={handlePay} disabled={isPayLoading}>
-                {isPayLoading ? (
+              <Button
+                size="sm"
+                onClick={canProcessWithoutPayment ? handleProcessOrder : handlePay}
+                disabled={isPayLoading || isProcessOrderLoading}
+              >
+                {isPayLoading || isProcessOrderLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  dictionary.proceed.payNow
+                  proceedLabel
                 )}
               </Button>
             ) : (
